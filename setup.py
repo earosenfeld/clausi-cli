@@ -3,14 +3,27 @@ from setuptools.command.build_py import build_py
 import os
 from pathlib import Path
 import sys
-import subprocess
 
-# Try to import yaml, install it if not available
-try:
-    import yaml
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
-    import yaml
+class PostUninstallCommand(Command):
+    """Post-uninstall command to remove config directory."""
+    description = "Remove .clausi configuration directory"
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        config_dir = Path.home() / ".clausi"
+        if config_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(config_dir)
+                print(f"Removed configuration directory: {config_dir}")
+            except Exception as e:
+                print(f"Warning: Could not remove configuration directory: {e}")
 
 class CustomBuildCommand(build_py):
     """Custom build command that ensures config is created."""
@@ -22,7 +35,6 @@ class CustomBuildCommand(build_py):
             raise SystemExit("Failed to create config file. Build aborted.")
             
         # Then run the normal build
-        
         build_py.run(self)
         
     def create_config(self):
@@ -56,13 +68,33 @@ class CustomBuildCommand(build_py):
                     "template": "default"
                 },
                 "regulations": {
-                    "default": "EU-AIA"
+                    "selected": ["EU-AIA", "GDPR", "ISO-42001", "HIPAA", "SOC2"]
                 }
             }
             
             print(f"[INFO] Writing config file...")
+            # Use simple string formatting instead of yaml
+            config_str = f"""api_key: ""
+api:
+  url: https://api.clausi.ai
+  timeout: 300
+  max_retries: 3
+report:
+  format: pdf
+  output_dir: reports
+  company_name: ""
+  company_logo: ""
+  template: default
+regulations:
+  selected:
+    - EU-AIA
+    - GDPR
+    - ISO-42001
+    - HIPAA
+    - SOC2
+"""
             with open(config_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False)
+                f.write(config_str)
             print(f"[SUCCESS] Created config file at: {config_path}")
             print(f"[INFO] Config file exists: {config_path.exists()}")
             print(f"[INFO] Config file size: {config_path.stat().st_size} bytes")
@@ -79,7 +111,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="clausi",
+    name="clausi-cli",
     version="0.1.0",
     author="Clausi",
     author_email="support@clausi.ai",
@@ -118,11 +150,11 @@ setup(
     entry_points={
         "console_scripts": [
             "clausi=clausi_cli.cli:main",
-            "clausi-config=clausi_cli.create_config:create_config",
         ],
     },
     license="MIT",
     cmdclass={
         'build_py': CustomBuildCommand,
-    }
+        'post_uninstall': PostUninstallCommand,
+    },
 ) 

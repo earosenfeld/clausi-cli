@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "pyyaml>=5.4.1"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clausi"
+name = "clausi-cli"
 version = "0.1.0"
 description = "AI compliance auditing tool"
 readme = "README.md"
-requires-python = ">=3.7"
-license = "MIT"
+requires-python = ">=3.8"
+license = {text = "MIT"}
 authors = [
     {name = "Clausi", email = "support@clausi.ai"}
 ]
@@ -26,12 +26,12 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "click>=8.0.0",
-    "rich>=10.0.0",
-    "requests>=2.26.0",
-    "pyyaml>=5.4.1",
-    "python-dotenv>=0.19.0",
-    "openai>=1.0.0",
+    "click",
+    "requests",
+    "pyyaml",
+    "rich",
+    "python-dotenv",
+    "openai",
 ]
 
 [project.urls]
@@ -45,6 +45,9 @@ clausi-config = "clausi_cli.create_config:create_config"
 
 [tool.setuptools]
 packages = ["clausi_cli"]
+
+[tool.setuptools.dynamic]
+version = {attr = "clausi_cli.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

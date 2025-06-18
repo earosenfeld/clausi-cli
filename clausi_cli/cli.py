@@ -48,6 +48,18 @@ REGULATIONS = {
         "name": "GDPR",
         "description": "General Data Protection Regulation",
     },
+    "ISO-42001": {
+        "name": "ISO 42001",
+        "description": "AI Management System – ISO/IEC 42001:2023",
+    },
+    "HIPAA": {
+        "name": "HIPAA",
+        "description": "Health Insurance Portability and Accountability Act",
+    },
+    "SOC2": {
+        "name": "SOC 2",
+        "description": "System and Organization Controls Type 2",
+    },
 }
 
 # Report templates
@@ -95,7 +107,7 @@ def create_default_config():
                 "template": "default"
             },
             "regulations": {
-                "default": "EU-AIA"
+                "selected": list(REGULATIONS.keys())  # Default to all regulations
             }
         }
         
@@ -145,33 +157,35 @@ def get_clausi_api_key():
     return None
 
 def get_openai_key() -> Optional[str]:
-    """Get OpenAI API key from environment or config."""
-    # First try environment variable
-    key = os.getenv("OPENAI_API_KEY")
-    if key:
-        return key
-    
-    # Then try config file
+    """Get OpenAI API key from config file."""
     config = load_config()
     if not config:
+        console.print("[debug] No config file found")
         return None
+    
     # top-level key preferred
     if config.get("openai_key"):
         return config["openai_key"]
+    
     # legacy location
-    return config.get("auth", {}).get("openai_key")
+    legacy_key = config.get("auth", {}).get("openai_key")
+    if legacy_key:
+        return legacy_key
+    
+    return None
 
 def validate_openai_key(key: str) -> bool:
     """Validate the OpenAI API key by making a test request."""
-    if not key:
+    if not key or not isinstance(key, str) or len(key.strip()) == 0:
         return False
     
     try:
-        openai.api_key = key
+        openai.api_key = key.strip()
         # Make a simple API call to verify the key
         openai.models.list()
         return True
-    except Exception:
+    except Exception as e:
+        console.print(f"[yellow]Warning: OpenAI key validation failed: {str(e)}[/yellow]")
         return False
 
 def scan_directory(path: str) -> List[Dict[str, str]]:
@@ -253,11 +267,10 @@ def config():
 @click.option("--company-name", help="Set your company name for reports")
 @click.option("--company-logo", type=click.Path(exists=True), help="Set your company logo for reports")
 @click.option("--output-dir", type=click.Path(), help="Set default report output directory")
-@click.option("--default-regulation", type=click.Choice(list(REGULATIONS.keys())), help="Set default regulation")
-@click.option("--default-template", type=click.Choice(list(REPORT_TEMPLATES.keys())), help="Set default report template")
+@click.option("--regulations", multiple=True, type=click.Choice(list(REGULATIONS.keys())), help="Set selected regulations (can be given multiple times)")
 def set(openai_key: Optional[str], timeout: Optional[int], max_retries: Optional[int],
         company_name: Optional[str], company_logo: Optional[str], output_dir: Optional[str],
-        default_regulation: Optional[str], default_template: Optional[str]):
+        regulations: Optional[List[str]]):
     """Set configuration values."""
     config = load_config()
     
@@ -274,10 +287,8 @@ def set(openai_key: Optional[str], timeout: Optional[int], max_retries: Optional
         config["report"]["company_logo"] = company_logo
     if output_dir:
         config["report"]["output_dir"] = output_dir
-    if default_regulation:
-        config["regulations"]["default"] = default_regulation
-    if default_template:
-        config["report"]["template"] = default_template
+    if regulations:
+        config.setdefault("regulations", {})["selected"] = list(regulations)
     
     if save_config(config):
         console.print("[green]✓[/green] Configuration updated successfully")
@@ -315,7 +326,8 @@ def show():
     
     # Add regulation settings
     regulations = config.get("regulations", {})
-    table.add_row("Default Regulation", regulations.get("default", "EU-AIA"))
+    selected_regs = regulations.get("selected", list(REGULATIONS.keys()))
+    table.add_row("Selected Regulations", ", ".join(selected_regs))
     
     console.print(table)
 
@@ -333,22 +345,49 @@ def path():
 @click.option("--format", type=click.Choice(["pdf", "html", "json"]), default="pdf", help="Report format")
 @click.option("--template", type=click.Choice(list(REPORT_TEMPLATES.keys())), help="Report template to use")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
+@click.option("--skip-confirmation", is_flag=True, help="Skip the confirmation prompt")
+@click.option("--max-cost", type=float, help="Maximum cost in dollars (e.g., --max-cost 1.00)")
+@click.option("--show-details", is_flag=True, help="Show per-file token estimates")
 def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional[str], openai_key: Optional[str],
-          format: str, template: Optional[str], verbose: bool):
+          format: str, template: Optional[str], verbose: bool, skip_confirmation: bool, max_cost: Optional[float],
+          show_details: bool):
     """Scan a directory for compliance issues."""
-    # Get OpenAI key from command line, environment, or config
+    console.print("\n[debug] Checking for OpenAI key...")
+    console.print(f"[debug] Command line key provided: {'Yes' if openai_key else 'No'}")
+    
+    # Get OpenAI key from command line or config
     if not openai_key:
         openai_key = get_openai_key()
+    
+    console.print(f"[debug] Final key status: {'Found' if openai_key else 'Not found'}")
+    
     if not openai_key:
-        console.print("[red]✗[/red] No OpenAI API key found. Please set the OPENAI_API_KEY environment variable")
+        console.print("\n[bold yellow]OpenAI API Key Required[/bold yellow]")
+        console.print("\nTo use Clausi CLI, you need to set up your OpenAI API key. You can do this in two ways:")
+        console.print("\n1. Using the setup wizard:")
+        console.print("   [cyan]clausi setup[/cyan]")
+        console.print("\n2. Or directly set the key:")
+        console.print("   [cyan]clausi config set --openai-key your-key-here[/cyan]")
+        console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
         sys.exit(1)
+    
+    # Validate OpenAI key
+    console.print("[debug] Validating OpenAI key...")
+    if not validate_openai_key(openai_key):
+        console.print("\n[bold yellow]Invalid OpenAI API Key[/bold yellow]")
+        console.print("\nThe provided OpenAI API key appears to be invalid. Please set a valid key using:")
+        console.print("\n[cyan]clausi config set --openai-key your-key-here[/cyan]")
+        console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
+        sys.exit(1)
+    
+    console.print("[debug] OpenAI key validation successful")
     
     # Handle regulations (tuple -> list)
     if regulation:
         regulations = list(regulation)
     else:
         cfg = load_config()
-        regulations = [cfg.get("regulations", {}).get("default", "EU-AIA")]
+        regulations = cfg.get("regulations", {}).get("selected", list(REGULATIONS.keys()))
     
     # Set default template if not specified
     if not template:
@@ -385,7 +424,7 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     
     console.print(f"Found {len(files)} files to analyze")
     
-    # Prepare the request data
+    # Prepare the initial request data for token estimation
     data = {
         "path": path,
         "regulations": regulations,
@@ -400,92 +439,168 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
                 "name": load_config().get("report", {}).get("company_name", ""),
                 "logo": load_config().get("report", {}).get("company_logo", "")
             }
-        }
+        },
+        "estimate_only": True  # Flag to indicate this is just for estimation
     }
     
-    # Send files to backend for analysis
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TimeRemainingColumn(),
-    ) as progress:
-        task = progress.add_task("Analyzing files...", total=None)
+    # Get token estimates from backend
+    try:
+        api_url = load_config().get("api", {}).get("url", DEFAULT_API_URL)
+        response = requests.post(
+            f"{api_url}/api/clausi/estimate",
+            json=data,
+            headers={
+                "X-OpenAI-Key": openai_key,
+                "Content-Type": "application/json"
+            },
+            timeout=300
+        )
         
-        try:
-            # Send request to backend
-            api_url = load_config().get("api", {}).get("url", DEFAULT_API_URL)
-            response = requests.post(
-                f"{api_url}/api/clausi/scan",
-                json=data,
-                headers={
-                    "X-OpenAI-Key": openai_key,
-                    "Content-Type": "application/json"
-                },
-                timeout=300
-            )
-            
-            if response.status_code != 200:
-                console.print(f"[red]Error from backend: {response.text}[/red]")
+        if response.status_code != 200:
+            console.print(f"[red]Error from backend: {response.text}[/red]")
+            sys.exit(1)
+        
+        estimate = response.json()
+        
+        # Display token estimates
+        console.print("\n[bold]Estimated Token Usage:[/bold]")
+        console.print(f"Total Tokens: {estimate['total_tokens']:,}")
+        console.print(f"- Prompt Tokens: {estimate['prompt_tokens']:,}")
+        console.print(f"- Completion Tokens: {estimate['completion_tokens']:,}")
+        console.print(f"Estimated Cost: ${estimate['estimated_cost']:.2f}")
+        
+        # Show per-regulation breakdown
+        console.print("\n[bold]Per Regulation Breakdown:[/bold]")
+        for reg in estimate['regulation_breakdown']:
+            console.print(f"\n{REGULATIONS[reg['regulation']]['name']}:")
+            console.print(f"- Total Tokens: {reg['total_tokens']:,}")
+            console.print(f"- Estimated Cost: ${reg['estimated_cost']:.2f}")
+        
+        # Show per-file breakdown if requested
+        if show_details:
+            console.print("\n[bold]Per File Breakdown:[/bold]")
+            for file in estimate['file_breakdown']:
+                console.print(f"\n{file['path']}:")
+                console.print(f"- Tokens: {file['tokens']:,}")
+                console.print(f"- Estimated Cost: ${file['estimated_cost']:.2f}")
+                if file.get('too_large', False):
+                    console.print(f"[red]- File is too large to analyze[/red]")
+        
+        # Check against max cost if specified
+        if max_cost is not None and estimate['estimated_cost'] > max_cost:
+            console.print(f"\n[red]Error: Estimated cost (${estimate['estimated_cost']:.2f}) exceeds maximum cost (${max_cost:.2f})[/red]")
+            sys.exit(1)
+        
+        # Check for file size limits
+        for file in estimate['file_breakdown']:
+            if file.get('too_large', False):
+                console.print(f"\n[red]Error: File {file['path']} is too large to analyze[/red]")
                 sys.exit(1)
+        
+        # Get user confirmation unless skipped
+        if not skip_confirmation:
+            if not click.confirm(f"\nProceed with analysis? Estimated cost: ${estimate['estimated_cost']:.2f}"):
+                console.print("[yellow]Analysis cancelled by user[/yellow]")
+                sys.exit(0)
+        
+        # Proceed with full analysis
+        data['estimate_only'] = False  # Remove the estimation flag
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task("Analyzing files...", total=None)
             
-            result = response.json()
-            progress.update(task, completed=True)
-            
-            # Save the report
-            if result.get("report_content") and result.get("report_filename"):
-                console.print("[yellow]Saving report...[/yellow]")
-                report_path = output_path / result["report_filename"]
-                with open(report_path, 'wb') as f:
-                    f.write(bytes.fromhex(result["report_content"]))
-                console.print(f"[green]Report saved to: {report_path}[/green]")
-            
-            # Save metadata
-            metadata = {
-                "timestamp": datetime.utcnow().isoformat(),
-                "path": path,
-                "regulations": regulations,
-                "mode": mode,
-                "files_analyzed": len(files),
-                "template": template,
-                "format": format,
-                "findings": result.get("findings", [])
-            }
-            save_audit_metadata(output_path, metadata)
-            
-            # Display findings
-            if result.get("findings"):
-                table = Table(title="Compliance Findings")
-                table.add_column("Clause", style="cyan")
-                table.add_column("Status", style="green")
-                table.add_column("Severity", style="yellow")
-                table.add_column("Location", style="blue")
-                table.add_column("Description", style="white")
+            try:
+                # Send request to backend
+                response = requests.post(
+                    f"{api_url}/api/clausi/scan",
+                    json=data,
+                    headers={
+                        "X-OpenAI-Key": openai_key,
+                        "Content-Type": "application/json"
+                    },
+                    timeout=300
+                )
                 
-                for finding in result["findings"]:
-                    status = "✓" if not finding.get("violation") else "✗"
-                    status_style = "green" if not finding.get("violation") else "red"
-                    table.add_row(
-                        finding.get("clause_id", ""),
-                        f"[{status_style}]{status}[/{status_style}]",
-                        finding.get("severity", ""),
-                        finding.get("location", ""),
-                        finding.get("description", "")
-                    )
+                if response.status_code != 200:
+                    console.print(f"[red]Error from backend: {response.text}[/red]")
+                    sys.exit(1)
                 
-                console.print(table)
-            
-            # Copy template assets
-            copy_template_assets(template, output_path)
-            
-            console.print(f"[green]Scan completed! Report saved to {output_path}[/green]")
-            
-        except requests.exceptions.RequestException as e:
-            console.print(f"[red]Error connecting to backend: {str(e)}[/red]")
-            sys.exit(1)
-        except Exception as e:
-            console.print(f"[red]Error during analysis: {str(e)}[/red]")
-            sys.exit(1)
+                result = response.json()
+                progress.update(task, completed=True)
+                
+                # Save the report
+                if result.get("report_content") and result.get("report_filename"):
+                    console.print("[yellow]Saving report...[/yellow]")
+                    report_path = output_path / result["report_filename"]
+                    with open(report_path, 'wb') as f:
+                        f.write(bytes.fromhex(result["report_content"]))
+                    console.print(f"[green]Report saved to: {report_path}[/green]")
+                
+                # Save metadata
+                metadata = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "path": path,
+                    "regulations": regulations,
+                    "mode": mode,
+                    "files_analyzed": len(files),
+                    "template": template,
+                    "format": format,
+                    "findings": result.get("findings", []),
+                    "token_usage": result.get("token_usage", {})
+                }
+                save_audit_metadata(output_path, metadata)
+                
+                # Display findings
+                if result.get("findings"):
+                    table = Table(title="Compliance Findings")
+                    table.add_column("Clause", style="cyan")
+                    table.add_column("Status", style="green")
+                    table.add_column("Severity", style="yellow")
+                    table.add_column("Location", style="blue")
+                    table.add_column("Description", style="white")
+                    
+                    for finding in result["findings"]:
+                        status = "✓" if not finding.get("violation") else "✗"
+                        status_style = "green" if not finding.get("violation") else "red"
+                        table.add_row(
+                            finding.get("clause_id", ""),
+                            f"[{status_style}]{status}[/{status_style}]",
+                            finding.get("severity", ""),
+                            finding.get("location", ""),
+                            finding.get("description", "")
+                        )
+                    
+                    console.print(table)
+                
+                # Display actual token usage
+                if "token_usage" in result:
+                    token_usage = result["token_usage"]
+                    console.print("\n[bold]Actual Token Usage:[/bold]")
+                    console.print(f"Total tokens used: {token_usage.get('total_tokens', 0):,}")
+                    console.print(f"Actual cost: ${token_usage.get('cost', 0):.2f}")
+                
+                # Copy template assets
+                copy_template_assets(template, output_path)
+                
+                console.print(f"[green]Scan completed! Report saved to {output_path}[/green]")
+                
+            except requests.exceptions.RequestException as e:
+                console.print(f"[red]Error connecting to backend: {str(e)}[/red]")
+                sys.exit(1)
+            except Exception as e:
+                console.print(f"[red]Error during analysis: {str(e)}[/red]")
+                sys.exit(1)
+                
+    except requests.exceptions.RequestException as e:
+        console.print(f"[red]Error connecting to backend: {str(e)}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error during estimation: {str(e)}[/red]")
+        sys.exit(1)
 
 @cli.command()
 def setup():
@@ -529,7 +644,7 @@ def setup():
             "template": template
         },
         "regulations": {
-            "default": regulation
+            "selected": [regulation]
         },
         "api": {
             "url": "https://api.clausi.ai",
