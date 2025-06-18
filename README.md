@@ -11,8 +11,9 @@
 4. [Configuration](#configuration)
 5. [Scanning Projects](#scanning-projects)
 6. [Environment Variables](#environment-variables)
-7. [Development & Contribution](#development--contribution)
-8. [License](#license)
+7. [API Endpoints](#api-endpoints)
+8. [Development & Contribution](#development--contribution)
+9. [License](#license)
 
 ---
 
@@ -135,6 +136,63 @@ Upon completion the CLI prints a table of findings and stores:
 | `CLAUSI_OUTPUT_DIR`| Overrides `report.output_dir`             |
 
 Precedence: **CLI flag → environment variable → config file → default**.
+
+---
+
+## API Endpoints
+The CLI communicates with the Clausi platform through two main endpoints:
+
+### 1. `/api/clausi/estimate`
+Estimates token usage and cost before running the full scan.
+
+**Expected Response:**
+```json
+{
+  "total_tokens": 1234,
+  "prompt_tokens": 1000,
+  "completion_tokens": 234,
+  "estimated_cost": 0.002,
+  "regulation_breakdown": [
+    {
+      "regulation": "EU-AIA",
+      "total_tokens": 1234,
+      "estimated_cost": 0.002
+    }
+  ],
+  "file_breakdown": [
+    {
+      "path": "path/to/file.py",
+      "tokens": 200,
+      "estimated_cost": 0.0004,
+      "too_large": false
+    }
+  ]
+}
+```
+
+### 2. `/api/clausi/scan`
+Performs the actual compliance analysis and generates the report.
+
+**Expected Response:**
+```json
+{
+  "findings": [
+    {
+      "clause_id": "A.1.2",
+      "violation": true,
+      "severity": "high",
+      "location": "file.py:123",
+      "description": "Description of the finding"
+    }
+  ],
+  "token_usage": {
+    "total_tokens": 1234,
+    "cost": 0.002
+  },
+  "report_content": "hex_encoded_report_content",
+  "report_filename": "report.pdf"
+}
+```
 
 ---
 
