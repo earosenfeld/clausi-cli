@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "pyyaml>=5.4.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clausi"
+version = "0.1.0"
+description = "AI compliance auditing tool"
+readme = "README.md"
+requires-python = ">=3.7"
+license = "MIT"
+authors = [
+    {name = "Clausi", email = "support@clausi.ai"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "click>=8.0.0",
+    "rich>=10.0.0",
+    "requests>=2.26.0",
+    "pyyaml>=5.4.1",
+    "python-dotenv>=0.19.0",
+    "openai>=1.0.0",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/clausi/clausi-cli/issues"
+"Documentation" = "https://docs.clausi.ai"
+"Source Code" = "https://github.com/clausi/clausi-cli"
+
+[project.scripts]
+clausi = "clausi_cli.cli:main"
+clausi-config = "clausi_cli.create_config:create_config"
+
+[tool.setuptools]
+packages = ["clausi_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+select = ["E", "F", "B", "I"]
+ignore = []
+
+[tool.ruff.isort]
+known-first-party = ["clausi_cli"] 
