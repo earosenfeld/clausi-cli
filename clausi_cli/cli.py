@@ -28,6 +28,14 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich import print as rprint
 from dotenv import load_dotenv
+try:
+    import pathspec
+except ImportError:
+    pathspec = None
+
+# Import our modules
+from . import scan as scan_module
+from . import config as config_module
 
 console = Console()
 
@@ -158,21 +166,7 @@ def get_clausi_api_key():
 
 def get_openai_key() -> Optional[str]:
     """Get OpenAI API key from config file."""
-    config = load_config()
-    if not config:
-        console.print("[debug] No config file found")
-        return None
-    
-    # top-level key preferred
-    if config.get("openai_key"):
-        return config["openai_key"]
-    
-    # legacy location
-    legacy_key = config.get("auth", {}).get("openai_key")
-    if legacy_key:
-        return legacy_key
-    
-    return None
+    return config_module.get_openai_key()
 
 def validate_openai_key(key: str) -> bool:
     """Validate the OpenAI API key by making a test request."""
@@ -245,8 +239,98 @@ def copy_template_assets(template: str, output_path: Path) -> None:
     if template_dir.exists():
         shutil.copytree(template_dir, output_path / "assets", dirs_exist_ok=True)
 
+def find_clausiignore_file(project_path: str) -> Optional[Path]:
+    """Find .clausiignore file by searching upward from project root."""
+    if pathspec is None:
+        console.print("[yellow]Warning: pathspec library not available. .clausiignore functionality disabled.[/yellow]")
+        return None
+    
+    current_path = Path(project_path).resolve()
+    
+    # Search upward from project root
+    while current_path != current_path.parent:
+        clausiignore_path = current_path / ".clausiignore"
+        if clausiignore_path.exists():
+            return clausiignore_path
+        current_path = current_path.parent
+    
+    return None
+
+def parse_clausiignore_file(clausiignore_path: Path) -> Optional[Any]:
+    """Parse .clausiignore file and return a PathSpec object."""
+    if pathspec is None:
+        return None
+    
+    try:
+        with open(clausiignore_path, 'r', encoding='utf-8') as f:
+            patterns = f.readlines()
+        
+        # Remove empty lines and comments
+        patterns = [line.strip() for line in patterns if line.strip() and not line.startswith('#')]
+        
+        if not patterns:
+            return None
+        
+        return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not parse .clausiignore file: {e}[/yellow]")
+        return None
+
+def filter_ignored_files(files: List[Dict[str, str]], project_path: str, ignore_patterns: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """Filter out files that match ignore patterns."""
+    if not files:
+        return files
+    
+    # Find .clausiignore file
+    clausiignore_path = find_clausiignore_file(project_path)
+    ignore_spec = None
+    
+    if clausiignore_path:
+        ignore_spec = parse_clausiignore_file(clausiignore_path)
+        if ignore_spec:
+            console.print(f"[green]Using .clausiignore file: {clausiignore_path}[/green]")
+    
+    # Parse command-line ignore patterns
+    cmd_ignore_spec = None
+    if ignore_patterns:
+        try:
+            cmd_ignore_spec = pathspec.PathSpec.from_lines('gitwildmatch', ignore_patterns)
+            console.print(f"[green]Using command-line ignore patterns: {', '.join(ignore_patterns)}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not parse command-line ignore patterns: {e}[/yellow]")
+    
+    if not ignore_spec and not cmd_ignore_spec:
+        return files
+    
+    project_path_obj = Path(project_path).resolve()
+    filtered_files = []
+    
+    for file_info in files:
+        file_path = Path(file_info["path"])
+        full_path = project_path_obj / file_path
+        
+        # Check if file should be ignored
+        should_ignore = False
+        
+        if ignore_spec and ignore_spec.match_file(str(file_path)):
+            should_ignore = True
+            console.print(f"[dim]Ignoring {file_path} (matches .clausiignore)[/dim]")
+        
+        if cmd_ignore_spec and cmd_ignore_spec.match_file(str(file_path)):
+            should_ignore = True
+            console.print(f"[dim]Ignoring {file_path} (matches command-line pattern)[/dim]")
+        
+        if not should_ignore:
+            filtered_files.append(file_info)
+    
+    ignored_count = len(files) - len(filtered_files)
+    if ignored_count > 0:
+        console.print(f"[green]Ignored {ignored_count} files based on .clausiignore patterns[/green]")
+    
+    return filtered_files
+
 @click.group()
-@click.version_option(version="0.1.0", prog_name="Clausi CLI")
+@click.version_option(version="0.3.0", prog_name="Clausi CLI")
 def cli():
     """Clausi - AI compliance auditing tool.
     
@@ -312,7 +396,16 @@ def show():
     
     # Add API settings
     api = config.get("api", {})
-    table.add_row("API URL", DEFAULT_API_URL)
+    
+    # Show API URL with tunnel indicator
+    current_api_url = get_api_url()
+    tunnel_base = os.getenv('CLAUSI_TUNNEL_BASE')
+    if tunnel_base:
+        api_url_display = f"{current_api_url} (via CLAUSI_TUNNEL_BASE)"
+    else:
+        api_url_display = current_api_url
+    table.add_row("API URL", api_url_display)
+    
     table.add_row("API Timeout", str(api.get("timeout", DEFAULT_API_TIMEOUT)))
     table.add_row("API Max Retries", str(api.get("max_retries", DEFAULT_API_MAX_RETRIES)))
     
@@ -342,18 +435,27 @@ def path():
 @click.option("--mode", type=click.Choice(["ai", "full"]), default="ai", help="Scanning mode (ai/full)")
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
 @click.option("--openai-key", help="OpenAI API key (overrides config)")
-@click.option("--format", type=click.Choice(["pdf", "html", "json"]), default="pdf", help="Report format")
+@click.option("--format", type=click.Choice(["pdf", "html", "json", "all"]), default="pdf", help="Report format (use 'all' for PDF, HTML, and JSON)")
 @click.option("--template", type=click.Choice(list(REPORT_TEMPLATES.keys())), help="Report template to use")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.option("--skip-confirmation", is_flag=True, help="Skip the confirmation prompt")
 @click.option("--max-cost", type=float, help="Maximum cost in dollars (e.g., --max-cost 1.00)")
 @click.option("--show-details", is_flag=True, help="Show per-file token estimates")
+@click.option("--min-severity", type=click.Choice(["info", "warning", "high", "critical"]), default="info", help="Minimum severity to report")
+@click.option("--ignore", multiple=True, help="Ignore files/directories (can be given multiple times)")
 def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional[str], openai_key: Optional[str],
           format: str, template: Optional[str], verbose: bool, skip_confirmation: bool, max_cost: Optional[float],
-          show_details: bool):
+          show_details: bool, min_severity: str, ignore: Optional[List[str]]):
     """Scan a directory for compliance issues."""
     console.print("\n[debug] Checking for OpenAI key...")
     console.print(f"[debug] Command line key provided: {'Yes' if openai_key else 'No'}")
+    
+    # Check payment requirements before estimate (for full mode)
+    # This should happen BEFORE OpenAI key validation
+    if mode == "full":
+        api_url = get_api_url()
+        if not scan_module.check_payment_required(api_url, mode):
+            return  # Exit if payment required
     
     # Get OpenAI key from command line or config
     if not openai_key:
@@ -406,6 +508,7 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     reg_names = ", ".join(REGULATIONS[r]["name"] for r in regulations)
     console.print(f"Regulations: {reg_names}")
     console.print(f"Mode: {mode}")
+    console.print(f"Minimum Severity: {min_severity}")
     
     # Scan directory
     with Progress(
@@ -424,11 +527,26 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     
     console.print(f"Found {len(files)} files to analyze")
     
+    # Filter files based on .clausiignore and command-line ignore patterns
+    if ignore:
+        ignore_list = list(ignore)
+    else:
+        ignore_list = None
+    
+    files = filter_ignored_files(files, path, ignore_list)
+    
+    if not files:
+        console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
+        sys.exit(1)
+    
+    console.print(f"Analyzing {len(files)} files after filtering")
+    
     # Prepare the initial request data for token estimation
     data = {
         "path": path,
         "regulations": regulations,
         "mode": mode,
+        "min_severity": min_severity,
         "metadata": {
             "path": path,
             "files": files,
@@ -445,7 +563,8 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     
     # Get token estimates from backend
     try:
-        api_url = load_config().get("api", {}).get("url", DEFAULT_API_URL)
+        api_url = get_api_url()
+        
         response = requests.post(
             f"{api_url}/api/clausi/estimate",
             json=data,
@@ -514,31 +633,46 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
             task = progress.add_task("Analyzing files...", total=None)
             
             try:
-                # Send request to backend
-                response = requests.post(
-                    f"{api_url}/api/clausi/scan",
-                    json=data,
-                    headers={
-                        "X-OpenAI-Key": openai_key,
-                        "Content-Type": "application/json"
-                    },
-                    timeout=300
-                )
-                
-                if response.status_code != 200:
-                    console.print(f"[red]Error from backend: {response.text}[/red]")
+                # Send request to backend with payment flow support
+                result = scan_module.make_scan_request(get_api_url(), openai_key, data)
+                if not result:
+                    console.print("[red]Scan failed[/red]")
                     sys.exit(1)
                 
-                result = response.json()
                 progress.update(task, completed=True)
                 
-                # Save the report
-                if result.get("report_content") and result.get("report_filename"):
-                    console.print("[yellow]Saving report...[/yellow]")
-                    report_path = output_path / result["report_filename"]
-                    with open(report_path, 'wb') as f:
-                        f.write(bytes.fromhex(result["report_content"]))
-                    console.print(f"[green]Report saved to: {report_path}[/green]")
+                # Handle multiple report formats
+                if result.get("generated_reports"):
+                    console.print("[yellow]Saving reports...[/yellow]")
+                    for report_info in result["generated_reports"]:
+                        report_format = report_info["format"]
+                        report_filename = report_info["filename"]
+                        
+                        try:
+                            # Download report from backend
+                            response = requests.get(
+                                f"{get_api_url()}/api/clausi/report/{report_filename}",
+                                headers={"Authorization": f"Bearer {openai_key}"},
+                                timeout=60
+                            )
+                            
+                            if response.status_code == 200:
+                                report_path = output_path / report_filename
+                                with open(report_path, 'wb') as f:
+                                    f.write(response.content)
+                                console.print(f"[green]{report_format.upper()} report saved to: {report_path}[/green]")
+                            else:
+                                console.print(f"[red]Failed to download {report_format} report: {response.status_code}[/red]")
+                        except Exception as e:
+                            console.print(f"[red]Error downloading {report_format} report: {str(e)}[/red]")
+                else:
+                    # Backward compatibility - save single report
+                    if result.get("report_content") and result.get("report_filename"):
+                        console.print("[yellow]Saving report...[/yellow]")
+                        report_path = output_path / result["report_filename"]
+                        with open(report_path, 'wb') as f:
+                            f.write(bytes.fromhex(result["report_content"]))
+                        console.print(f"[green]Report saved to: {report_path}[/green]")
                 
                 # Save metadata
                 metadata = {
@@ -601,6 +735,11 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     except Exception as e:
         console.print(f"[red]Error during estimation: {str(e)}[/red]")
         sys.exit(1)
+
+@cli.command()
+def tokens():
+    """Show token status and remaining credits for full-mode scans."""
+    config_module.show_token_status()
 
 @cli.command()
 def setup():
@@ -666,6 +805,21 @@ def edit():
         os.system(f"{editor} {path}")
     except Exception as e:
         console.print(f"[red]✗[/red] Could not open editor: {e}")
+
+def get_api_url() -> str:
+    """Get the API URL, prioritizing CLAUSI_TUNNEL_BASE environment variable."""
+    # First check for tunnel base URL
+    tunnel_base = os.getenv('CLAUSI_TUNNEL_BASE')
+    if tunnel_base:
+        return tunnel_base.rstrip('/')
+    
+    # Then check config file
+    config = load_config()
+    if config and config.get("api", {}).get("url"):
+        return config["api"]["url"]
+    
+    # Fall back to default
+    return DEFAULT_API_URL
 
 def main():
     """Main entry point for the CLI."""

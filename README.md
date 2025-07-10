@@ -11,9 +11,11 @@
 4. [Configuration](#configuration)
 5. [Scanning Projects](#scanning-projects)
 6. [Environment Variables](#environment-variables)
-7. [API Endpoints](#api-endpoints)
-8. [Development & Contribution](#development--contribution)
-9. [License](#license)
+7. [File Ignoring](#file-ignoring)
+8. [GitHub Actions](#github-actions)
+9. [API Endpoints](#api-endpoints)
+10. [Development & Contribution](#development--contribution)
+11. [License](#license)
 
 ---
 
@@ -107,9 +109,14 @@ Common options:
 |------------------------------|----------------------------------------------------------|
 | `-r`, `--regulation`         | Regulation key (repeat for multiple)                     |
 | `--mode ai \| full`          | `ai` = lightweight analysis (default), `full` = deep scan |
-| `--format pdf \| html \| json`| Report format                                            |
+| `--min-severity`             | Minimum severity to report (info, warning, high, critical) |
+| `--format pdf \| html \| json \| all`| Report format (use 'all' for PDF, HTML, and JSON)     |
 | `--template`                 | Report template (`default`, `detailed`, `executive`)     |
 | `-o`, `--output`             | Output directory (otherwise uses config)                 |
+| `--max-cost`                 | Maximum cost in dollars (e.g., --max-cost 1.00)          |
+| `--skip-confirmation`        | Skip the confirmation prompt                             |
+| `--show-details`             | Show per-file token estimates                            |
+| `--ignore`                   | Ignore files/directories (can be given multiple times)   |
 
 Examples:
 ```bash
@@ -121,6 +128,21 @@ clausi scan /srv/app -r GDPR --mode full --format html
 
 # Scan against both regulations, use detailed template
 clausi scan ~/project -r EU-AIA -r GDPR --template detailed
+
+# Generate all report formats simultaneously
+clausi scan . --format all
+
+# Only report high and critical severity issues
+clausi scan . -r EU-AIA --min-severity high
+
+# Cost-controlled scan with confirmation skipped
+clausi scan . --max-cost 5.00 --skip-confirmation
+
+# Ignore specific files and directories
+clausi scan . --ignore "tests/" --ignore "*.log" --ignore "temp/"
+
+# Use .clausiignore file (same rules as .gitignore)
+clausi scan . --min-severity warning
 ```
 
 Upon completion the CLI prints a table of findings and stores:
@@ -134,8 +156,193 @@ Upon completion the CLI prints a table of findings and stores:
 |--------------------|-------------------------------------------|
 | `OPENAI_API_KEY`   | Overrides `openai_key` from the YAML file |
 | `CLAUSI_OUTPUT_DIR`| Overrides `report.output_dir`             |
+| `CLAUSI_TUNNEL_BASE`| Overrides the API base URL (e.g., for tunnel connections) |
 
 Precedence: **CLI flag → environment variable → config file → default**.
+
+### Using CLAUSI_TUNNEL_BASE
+
+The `CLAUSI_TUNNEL_BASE` environment variable allows you to override the default API URL. This is useful when using tunnel connections or when the backend is hosted at a different URL.
+
+```bash
+# Use tunnel connection
+CLAUSI_TUNNEL_BASE=https://api.clausi.ai clausi scan .
+
+# Use local development server
+CLAUSI_TUNNEL_BASE=http://localhost:8000 clausi scan .
+
+# Check current configuration (shows tunnel indicator)
+clausi config show
+```
+
+When `CLAUSI_TUNNEL_BASE` is set, the CLI will display it in the configuration with a tunnel indicator: `https://api.clausi.ai (via CLAUSI_TUNNEL_BASE)`.
+
+---
+
+## File Ignoring
+
+Clausi CLI supports ignoring files and directories using `.clausiignore` files and command-line patterns.
+
+### .clausiignore File
+
+Create a `.clausiignore` file in your project root (or any parent directory) to specify files and directories to exclude from analysis. Uses the same syntax as `.gitignore`:
+
+```bash
+# Ignore test files
+tests/
+test_*.py
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+
+# Ignore logs and temporary files
+*.log
+temp/
+tmp/
+
+# Ignore specific files
+config.local.py
+secrets.json
+```
+
+### Command-line Ignoring
+
+Use the `--ignore` flag to specify patterns directly:
+
+```bash
+# Ignore multiple patterns
+clausi scan . --ignore "tests/" --ignore "*.log" --ignore "temp/"
+
+# Ignore specific files
+clausi scan . --ignore "config.local.py" --ignore "secrets.json"
+```
+
+### Ignore Rules
+
+- **Patterns**: Use glob patterns (e.g., `*.py`, `tests/`, `**/temp/`)
+- **Comments**: Lines starting with `#` are ignored
+- **Search Path**: CLI searches upward from project root for `.clausiignore`
+- **Combined**: Both `.clausiignore` and `--ignore` patterns are applied
+- **Fallback**: If `pathspec` library is unavailable, ignore functionality is disabled
+
+---
+
+## GitHub Actions
+
+[![Clausi Compliance Scan](https://github.com/earosenfeld/clausi-cli/workflows/Compliance%20Check/badge.svg)](https://github.com/earosenfeld/clausi-cli/actions)
+
+Automate compliance checks in your CI/CD pipeline with the Clausi GitHub Action.
+
+### Quick Setup
+
+1. **Add the action to your workflow:**
+   ```yaml
+   name: Compliance Check
+   
+   on:
+     pull_request:
+       branches: [ main ]
+   
+   jobs:
+     compliance-scan:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Run Clausi Compliance Scan
+           uses: ./
+           with:
+             openai-key: ${{ secrets.OPENAI_API_KEY }}
+   ```
+
+2. **Set up the secret:**
+   - Go to your repository Settings → Secrets and variables → Actions
+   - Add `OPENAI_API_KEY` with your OpenAI API key
+
+3. **Customize the scan:**
+   ```yaml
+   - name: Run Clausi Compliance Scan
+     uses: ./
+     with:
+       path: 'src/'                    # Scan specific directory
+       mode: 'full'                    # Deep analysis
+       max-cost: '5.00'               # Cost limit
+       regulations: 'EU-AIA,GDPR'     # Multiple regulations
+       format: 'html'                 # Report format
+       template: 'detailed'           # Report template
+       openai-key: ${{ secrets.OPENAI_API_KEY }}
+   ```
+
+### Action Inputs
+
+| Input | Description | Default | Required |
+|-------|-------------|---------|----------|
+| `path` | Path to scan | `.` | No |
+| `mode` | Scan mode (`ai` or `full`) | `ai` | No |
+| `min-severity` | Minimum severity to report | `info` | No |
+| `max-cost` | Maximum cost in dollars | `10.00` | No |
+| `regulations` | Comma-separated regulations | `EU-AIA` | No |
+| `format` | Report format (`pdf`, `html`, `json`, `all`) | `html` | No |
+| `template` | Report template | `default` | No |
+| `ignore` | Comma-separated ignore patterns | `` | No |
+| `openai-key` | OpenAI API key | - | **Yes** |
+| `skip-confirmation` | Skip confirmation prompt | `true` | No |
+
+### Example Workflows
+
+**Basic compliance check:**
+```yaml
+- uses: ./
+  with:
+    openai-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+**Comprehensive audit:**
+```yaml
+- uses: ./
+  with:
+    mode: 'full'
+    max-cost: '20.00'
+    regulations: 'EU-AIA,GDPR,ISO-42001'
+    format: 'pdf'
+    template: 'detailed'
+    openai-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+**Cost-conscious scanning:**
+```yaml
+- uses: ./
+  with:
+    mode: 'ai'
+    max-cost: '2.00'
+    regulations: 'EU-AIA'
+    format: 'html'
+    openai-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+**With ignore patterns:**
+```yaml
+- uses: ./
+  with:
+    mode: 'ai'
+    min-severity: 'warning'
+    ignore: 'tests/,*.log,temp/'
+    openai-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+**Generate all report formats:**
+```yaml
+- uses: ./
+  with:
+    format: 'all'
+    openai-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+The action will:
+- Install and configure Clausi CLI
+- Run the compliance scan
+- Upload the report as an artifact
+- Continue on error (won't fail your build)
 
 ---
 
@@ -189,8 +396,20 @@ Performs the actual compliance analysis and generates the report.
     "total_tokens": 1234,
     "cost": 0.002
   },
-  "report_content": "hex_encoded_report_content",
-  "report_filename": "report.pdf"
+  "generated_reports": [
+    {
+      "format": "pdf",
+      "filename": "audit.pdf"
+    },
+    {
+      "format": "html", 
+      "filename": "audit.html"
+    },
+    {
+      "format": "json",
+      "filename": "audit.json"
+    }
+  ]
 }
 ```
 

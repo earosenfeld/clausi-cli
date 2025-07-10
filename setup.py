@@ -112,7 +112,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="clausi-cli",
-    version="0.1.0",
+    version="0.3.0",
     author="Clausi",
     author_email="support@clausi.ai",
     description="AI compliance auditing tool",
@@ -146,6 +146,7 @@ setup(
         "pyyaml>=5.4.1",
         "python-dotenv>=0.19.0",
         "openai>=1.0.0",
+        "pathspec>=0.10.0",
     ],
     entry_points={
         "console_scripts": [
