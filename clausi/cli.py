@@ -829,7 +829,12 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
             # Copy template assets
             copy_template_assets(template, output_path)
 
-            console.print(f"[green]Scan completed! Report saved to {output_path}[/green]")
+            # Get actual output directory from backend response
+            actual_output_dir = result.get("output_dir")
+            if actual_output_dir:
+                console.print(f"[green]Scan completed! Reports saved to {actual_output_dir}[/green]")
+            else:
+                console.print(f"[green]Scan completed![/green]")
 
             # Handle markdown outputs
             from clausi.utils.output import (
@@ -841,7 +846,7 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
             # Check if backend provided markdown files (run_id in response)
             run_id = result.get("run_id")
             if run_id:
-                console.print("\n[cyan]📄 Downloading markdown reports...[/cyan]")
+                console.print("\n[cyan]📄 Markdown reports available...[/cyan]")
                 markdown_files = download_markdown_files(
                     api_url=get_api_url(),
                     run_id=run_id,
@@ -868,10 +873,13 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
                     if auto_open and findings_md.exists():
                         open_in_editor(findings_md)
 
-                console.print(f"\n[cyan]📁 All reports saved to: {output_path}[/cyan]")
-            else:
-                # Backward compatibility: no markdown support from backend yet
-                console.print(f"[dim]Note: Markdown reports not available for this scan[/dim]")
+                if actual_output_dir:
+                    console.print(f"\n[cyan]📁 Complete report package available at: {actual_output_dir}[/cyan]")
+                    console.print(f"[dim]  • findings.md - Detailed compliance findings[/dim]")
+                    console.print(f"[dim]  • compliance_report.md - Executive summary[/dim]")
+                    console.print(f"[dim]  • traceability_matrix.md - Clause coverage matrix[/dim]")
+                    console.print(f"[dim]  • REMEDIATION.md - AI-powered remediation guide[/dim]")
+                    console.print(f"[dim]  • report.pdf - Full PDF report[/dim]")
 
         except requests.exceptions.RequestException as e:
             console.print(f"[red]Error connecting to backend: {str(e)}[/red]")

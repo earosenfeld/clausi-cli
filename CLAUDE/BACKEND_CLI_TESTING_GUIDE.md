@@ -53,8 +53,18 @@ report:
 
 ### 3. Quick Test
 
+**Using Claude Code CLI (Free, No API Costs - RECOMMENDED FOR TESTING):**
 ```bash
-# Simple test scan
+# Test scan with Claude Code CLI - uses local Claude installation, no API charges
+clausi scan . --regulation EU-AIA --use-claude-code --skip-confirmation
+
+# Or from CLI source directory:
+python -m clausi scan "C:\Users\Eric\Dev\clausi\clausi\test_sample_project" --regulation EU-AIA --use-claude-code --skip-confirmation
+```
+
+**Using API Key (Requires Credits):**
+```bash
+# Simple test scan with API key (charges apply)
 clausi scan . --regulations EU-AIA --skip-confirmation
 ```
 
