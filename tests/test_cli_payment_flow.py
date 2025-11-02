@@ -17,11 +17,11 @@ import json
 import sys
 from pathlib import Path
 
-# Add the clausi_cli directory to the path
-sys.path.insert(0, str(Path(__file__).parent / "clausi_cli"))
+# Add the clausi directory to the path
+sys.path.insert(0, str(Path(__file__).parent / "clausi"))
 
-from clausi_cli.scan import handle_scan_response, handle_payment_required, check_payment_required
-from clausi_cli.config import get_api_token, save_api_token
+from clausi.scan import handle_scan_response, handle_payment_required, check_payment_required
+from clausi.config import get_api_token, save_api_token
 import requests
 
 def create_mock_response(status_code: int, json_data: dict) -> requests.Response:

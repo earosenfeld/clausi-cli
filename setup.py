@@ -81,7 +81,7 @@ api:
   max_retries: 3
 report:
   format: pdf
-  output_dir: reports
+  output_dir: clausi/reports
   company_name: ""
   company_logo: ""
   template: default
@@ -111,11 +111,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="clausi-cli",
-    version="0.3.0",
+    name="clausi",
+    version="1.0.0",
     author="Clausi",
     author_email="support@clausi.ai",
-    description="AI compliance auditing tool",
+    description="AI compliance auditing CLI",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://clausi.ai",
@@ -126,19 +126,20 @@ setup(
     },
     packages=find_packages(),
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Security",
         "Topic :: System :: Systems Administration",
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     install_requires=[
         "click>=8.0.0",
         "rich>=10.0.0",
@@ -147,10 +148,11 @@ setup(
         "python-dotenv>=0.19.0",
         "openai>=1.0.0",
         "pathspec>=0.10.0",
+        "textual>=0.47.0",  # TUI framework
     ],
     entry_points={
         "console_scripts": [
-            "clausi=clausi_cli.cli:main",
+            "clausi=clausi.cli:main",
         ],
     },
     license="MIT",

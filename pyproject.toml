@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clausi-cli"
-version = "0.1.0"
-description = "AI compliance auditing tool"
+name = "clausi"
+version = "1.0.0"
+description = "AI compliance auditing CLI"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -13,25 +13,27 @@ authors = [
     {name = "Clausi", email = "support@clausi.ai"}
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Security",
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "click",
-    "requests",
-    "pyyaml",
-    "rich",
-    "python-dotenv",
-    "openai",
+    "click>=8.0.0",
+    "rich>=10.0.0",
+    "requests>=2.26.0",
+    "pyyaml>=5.4.1",
+    "python-dotenv>=0.19.0",
+    "openai>=1.0.0",
+    "pathspec>=0.10.0",
 ]
 
 [project.urls]
@@ -40,14 +42,13 @@ dependencies = [
 "Source Code" = "https://github.com/clausi/clausi-cli"
 
 [project.scripts]
-clausi = "clausi_cli.cli:main"
-clausi-config = "clausi_cli.create_config:create_config"
+clausi = "clausi.cli:main"
 
 [tool.setuptools]
-packages = ["clausi_cli"]
+packages = ["clausi"]
 
 [tool.setuptools.dynamic]
-version = {attr = "clausi_cli.__version__"}
+version = {attr = "clausi.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -60,4 +61,7 @@ select = ["E", "F", "B", "I"]
 ignore = []
 
 [tool.ruff.isort]
-known-first-party = ["clausi_cli"] 
+known-first-party = ["clausi"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0", "ruff>=0.1.0", "black>=23.0.0", "mypy>=1.0.0"] 

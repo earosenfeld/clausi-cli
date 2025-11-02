@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.panel import Panel
 import click
 
-console = Console()
+console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
 
 # Constants
 CONFIG = Path.home() / ".clausi" / "credentials.yml"
@@ -111,20 +111,66 @@ def get_openai_key() -> Optional[str]:
     openai_key = os.getenv('OPENAI_API_KEY')
     if openai_key:
         return openai_key
-    
+
     # Then try config file
     config = load_config()
     if config:
-        # top-level key preferred
+        # Check new api_keys structure
+        if config.get("api_keys", {}).get("openai"):
+            return config["api_keys"]["openai"]
+
+        # top-level key preferred (legacy)
         if config.get("openai_key"):
             return config["openai_key"]
-        
+
         # legacy location
         legacy_key = config.get("auth", {}).get("openai_key")
         if legacy_key:
             return legacy_key
-    
+
     return None
+
+def get_anthropic_key() -> Optional[str]:
+    """Get Anthropic API key from environment or config."""
+    # First try environment variable
+    anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+    if anthropic_key:
+        return anthropic_key
+
+    # Then try config file
+    config = load_config()
+    if config:
+        # Check new api_keys structure
+        if config.get("api_keys", {}).get("anthropic"):
+            return config["api_keys"]["anthropic"]
+
+    return None
+
+def get_ai_provider() -> str:
+    """Get AI provider from config (defaults to claude)."""
+    config = load_config()
+    if config:
+        provider = config.get("ai", {}).get("provider", "claude")
+        return provider
+    return "claude"
+
+def get_ai_model(provider: str = None) -> str:
+    """Get AI model for given provider from config."""
+    if not provider:
+        provider = get_ai_provider()
+
+    config = load_config()
+    if config:
+        # Check for provider-specific model in config
+        model = config.get("ai", {}).get("model")
+        if model:
+            return model
+
+    # Default models
+    if provider == "claude":
+        return "claude-3-5-sonnet-20241022"
+    else:  # openai
+        return "gpt-4"
 
 def show_token_status():
     """Show token status and remaining credits."""

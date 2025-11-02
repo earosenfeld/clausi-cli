@@ -1,21 +1,25 @@
 # Clausi CLI
 
-> Modern command-line interface for auditing software projects against the **EU AI Act** and **GDPR**.
+> Modern command-line interface for AI compliance auditing against **EU AI Act**, **GDPR**, **ISO 42001**, and more.
+
+**Version:** 1.0.0 | **AI Providers:** Claude (Anthropic) + OpenAI
 
 ---
+
 
 ## Table of Contents
 1. [Overview](#overview)
 2. [Installation](#installation)
-3. [Quick-start (End Users)](#quick-start-end-users)
-4. [Configuration](#configuration)
-5. [Scanning Projects](#scanning-projects)
-6. [Environment Variables](#environment-variables)
-7. [File Ignoring](#file-ignoring)
-8. [GitHub Actions](#github-actions)
-9. [API Endpoints](#api-endpoints)
-10. [Development & Contribution](#development--contribution)
-11. [License](#license)
+3. [Quick Start](#quick-start)
+4. [New in v1.0.0](#new-in-v100)
+5. [Configuration](#configuration)
+6. [Scanning Projects](#scanning-projects)
+7. [Environment Variables](#environment-variables)
+8. [File Ignoring](#file-ignoring)
+9. [GitHub Actions](#github-actions)
+10. [API Endpoints](#api-endpoints)
+11. [Development & Contribution](#development--contribution)
+12. [License](#license)
 
 ---
 
@@ -50,20 +54,71 @@ Python ≥ 3.8 is required.
 
 ---
 
-## Quick-start (End Users)
-1. **Interactive wizard** (recommended for the first run)
+## Quick Start
+
+### **1. Install**
+```bash
+pip install clausi
+clausi --version  # Should show: 1.0.0
+```
+
+### **2. Get API Key**
+
+Choose your AI provider:
+
+**Option A: Claude (Recommended)**
+```bash
+# Get key from: https://console.anthropic.com
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+```
+
+**Option B: OpenAI**
+```bash
+# Get key from: https://platform.openai.com/api-keys
+export OPENAI_API_KEY=sk-your-key-here
+```
+
+### **3. Run Your First Scan**
+
+```bash
+# Basic scan
+clausi scan .
+
+# With features
+clausi scan . --preset critical-only --open-findings
+```
+
+
+---
+
+## New in v1.0.0
+
+### **🚀 Major Features**
+
+1. **Multi-Model Support** - Choose Claude (Anthropic) or OpenAI
    ```bash
-   clausi setup
+   clausi scan . --ai-provider claude  # Faster, cheaper, better
+   clausi models list                  # View all models
    ```
-2. **Or set the OpenAI key directly**
+
+2. **Clause Scoping** - Reduce scan time and cost by 60-80%
    ```bash
-   clausi config set --openai-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   clausi scan . --preset critical-only  # Only critical clauses
+   clausi scan . --include EUAIA-3.1     # Specific clauses
    ```
-3. **Run your first scan**
+
+3. **Markdown-First Output** - Auto-open findings in your editor
    ```bash
-   clausi scan /path/to/project -r EU-AIA
+   clausi scan . --open-findings      # Auto-opens findings.md
+   clausi scan . --show-markdown      # Terminal preview
    ```
-   The report is saved to `./reports/` by default.
+
+4. **Cache Statistics** - See cost savings from caching
+   ```bash
+   clausi scan . --show-cache-stats
+   # Output: Cache Hit Rate: 80%, Cost Saved: $2.25
+   ```
+
 
 ---
 

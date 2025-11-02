@@ -10,11 +10,11 @@ import os
 import sys
 from pathlib import Path
 
-# Add the project root to the path so we can import clausi_cli
+# Add the project root to the path so we can import clausi
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from clausi_cli.scan import check_payment_required
+from clausi.scan import check_payment_required
 import requests
 
 def get_api_url():
