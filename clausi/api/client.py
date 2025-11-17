@@ -2,9 +2,7 @@
 
 import requests
 from typing import Dict, Any, Optional
-from rich.console import Console
-
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+from clausi.utils.console import console
 
 
 class ClausiClient:

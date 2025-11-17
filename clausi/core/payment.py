@@ -8,16 +8,13 @@ import requests
 from pathlib import Path
 from typing import Optional, Dict, Any
 import yaml
-from rich.console import Console
 from rich.panel import Panel
 import click
-
-# Configure console with UTF-8 encoding for Windows compatibility
-console = Console(legacy_windows=False)
 
 # Import configuration functions from utils module
 from clausi.utils.config import get_api_token, save_api_token
 from clausi.utils.emoji import get as emoji
+from clausi.utils.console import console
 
 def check_payment_required(api_url: str, mode: str = "full") -> bool:
     """Check if payment is required before proceeding with scan."""

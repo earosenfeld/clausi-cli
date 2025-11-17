@@ -21,8 +21,8 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from clausi.config import get_openai_key, get_api_token
-from clausi.scan import check_payment_required
+from clausi.utils.config import get_openai_key, get_api_token
+from clausi.core.payment import check_payment_required
 
 def get_api_url():
     """Get the API URL, prioritizing CLAUSI_TUNNEL_BASE environment variable."""

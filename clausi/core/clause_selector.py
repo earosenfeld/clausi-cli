@@ -1,11 +1,9 @@
 """Clause selection and scoping utilities."""
 
 from typing import List, Optional, Tuple
-from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt
-
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+from clausi.utils.console import console
 
 # Predefined clause presets for quick scoping
 CLAUSE_PRESETS = {

@@ -1,0 +1,23 @@
+
+Using Claude Code CLI (free, no API costs)
+Starting compliance scan for C:\Users\Eric\Dev\clausi\clausi\test_sample_project
+Regulations: EU AI Act
+Mode: ai
+Minimum Severity: info
+- Scanning project files... ----------------------------------------  0:00:00  
+Found 5 files to analyze
+Analyzing 5 files after filtering
+
+Estimated Token Usage:
+Total Tokens: 17,491
+- Prompt Tokens: 13,153
+- Completion Tokens: 4,338
+Estimated Cost: $0.12
+
+Per Regulation Breakdown:
+
+EU AI Act:
+- Total Tokens: 17,491
+- Estimated Cost: $0.12
+
+Proceed with analysis? Estimated cost: $0.12 [y/N]: Error during estimation: 

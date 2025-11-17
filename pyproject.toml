@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clausi"
-version = "1.0.0"
+dynamic = ["version"]
 description = "AI compliance auditing CLI"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -34,6 +34,7 @@ dependencies = [
     "python-dotenv>=0.19.0",
     "openai>=1.0.0",
     "pathspec>=0.10.0",
+    "textual>=0.47.0",
 ]
 
 [project.urls]

@@ -5,13 +5,30 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Optional, List
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
 from clausi.utils.emoji import get as emoji
+from clausi.utils.console import console
 
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+
+def ensure_output_dir(path: str, output_dir: Optional[str] = None) -> Path:
+    """Ensure output directory exists and return its path.
+
+    Args:
+        path: Project path (unused but kept for compatibility)
+        output_dir: Optional custom output directory path
+
+    Returns:
+        Path to the output directory
+    """
+    if output_dir:
+        output_path = Path(output_dir)
+    else:
+        # Default to clausi/reports directory to avoid conflicts with existing project reports/
+        output_path = Path.cwd() / "clausi" / "reports"
+    output_path.mkdir(parents=True, exist_ok=True)
+    return output_path
 
 
 def open_in_editor(file_path: Path) -> bool:

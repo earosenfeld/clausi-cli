@@ -6,12 +6,10 @@ import requests
 from pathlib import Path
 from typing import Optional, Dict, Any
 import yaml
-from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 import click
-
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+from clausi.utils.console import console
 
 # Constants
 CONFIG = Path.home() / ".clausi" / "credentials.yml"

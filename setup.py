@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 import sys
 
+# Import version from package
+sys.path.insert(0, str(Path(__file__).parent))
+from clausi import __version__
+
 class PostUninstallCommand(Command):
     """Post-uninstall command to remove config directory."""
     description = "Remove .clausi configuration directory"
@@ -112,7 +116,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="clausi",
-    version="1.0.0",
+    version=__version__,
     author="Clausi",
     author_email="support@clausi.ai",
     description="AI compliance auditing CLI",

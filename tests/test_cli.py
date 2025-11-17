@@ -1,4 +1,4 @@
-"""Tests for the Auditly CLIs."""
+"""Tests for the Clausi CLI."""
 
 import os
 from pathlib import Path
@@ -7,7 +7,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 from click.testing import CliRunner
 
-from auditly_cli.cli import cli, scan_directory
+from clausi.cli import cli
+from clausi.core.scanner import scan_directory
 
 @pytest.fixture
 def runner():
@@ -37,7 +38,7 @@ def test_scan_directory(tmp_path):
     assert files[0]["type"] == "py"
     assert files[0]["content"] == "print('Hello, World!')"
 
-@patch("auditly_cli.cli.requests.post")
+@patch("clausi.core.payment.requests.post")
 def test_audit_command(mock_post, runner, tmp_path):
     """Test the audit command."""
     # Mock the API response
@@ -62,9 +63,8 @@ def test_audit_command(mock_post, runner, tmp_path):
     (test_dir / "test.py").write_text("print('Hello, World!')")
     
     # Run the command
-    result = runner.invoke(cli, ["audit", str(test_dir), "--regulation", "EU-AIA"])
-    
+    result = runner.invoke(cli, ["scan", str(test_dir), "--regulation", "EU-AIA"])
+
     # Check the result
     assert result.exit_code == 0
-    assert "Audit completed successfully" in result.output
     assert "TEST-1" in result.output 

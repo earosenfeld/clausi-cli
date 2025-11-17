@@ -9,9 +9,7 @@ try:
 except ImportError:
     pathspec = None
 
-from rich.console import Console
-
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+from clausi.utils.console import console
 
 
 def scan_directory(path: str) -> List[Dict[str, str]]:
@@ -48,17 +46,6 @@ def scan_directory(path: str) -> List[Dict[str, str]]:
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not read {file_path}: {e}[/yellow]")
     return files_to_analyze
-
-
-def ensure_output_dir(path: str, output_dir: Optional[str] = None) -> Path:
-    """Ensure output directory exists and return its path. Default to ./reports in the current working directory."""
-    if output_dir:
-        output_path = Path(output_dir)
-    else:
-        # Default to reports directory in the current working directory
-        output_path = Path.cwd() / "reports"
-    output_path.mkdir(parents=True, exist_ok=True)
-    return output_path
 
 
 def find_clausiignore_file(project_path: str) -> Optional[Path]:

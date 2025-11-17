@@ -34,44 +34,31 @@ except ImportError:
     pathspec = None
 
 # Import our modules
+from clausi import __version__
 from clausi.core import payment as scan_module
 from clausi.utils import config as config_module
 from clausi.core import clause_selector
 from clausi.core import scanner
 from clausi.api import client
-
-console = Console(legacy_windows=False)  # UTF-8 encoding for Windows
+from clausi.utils.console import console
+from clausi.utils.output import ensure_output_dir
+from clausi.utils import regulations as regs_module
 
 # Constants
 DEFAULT_API_URL = "https://api.clausi.ai"
 DEFAULT_API_TIMEOUT = 300
 DEFAULT_API_MAX_RETRIES = 3
 
-# Supported regulations
-# NOTE: Users can only choose from these two built-in regulations.
-# If additional frameworks are added later, extend this mapping.
-REGULATIONS = {
-    "EU-AIA": {
-        "name": "EU AI Act",
-        "description": "European Union Artificial Intelligence Act",
-    },
-    "GDPR": {
-        "name": "GDPR",
-        "description": "General Data Protection Regulation",
-    },
-    "ISO-42001": {
-        "name": "ISO 42001",
-        "description": "AI Management System – ISO/IEC 42001:2023",
-    },
-    "HIPAA": {
-        "name": "HIPAA",
-        "description": "Health Insurance Portability and Accountability Act",
-    },
-    "SOC2": {
-        "name": "SOC 2",
-        "description": "System and Organization Controls Type 2",
-    },
-}
+# Load regulations dynamically (built-in from backend + custom from local)
+def get_regulations():
+    """Get all available regulations (cached for performance)."""
+    if not hasattr(get_regulations, '_cached'):
+        built_in, custom = regs_module.get_all_regulations()
+        # Merge for backward compatibility with REGULATIONS dict lookups
+        get_regulations._cached = {**built_in, **{k: {'name': k, 'description': 'Custom regulation'} for k in custom}}
+    return get_regulations._cached
+
+REGULATIONS = get_regulations()  # Backward compatibility
 
 # Report templates
 REPORT_TEMPLATES = {
@@ -93,15 +80,9 @@ REPORT_TEMPLATES = {
 }
 
 # Config paths
-def get_config_path():
-    """Get the path to the config file."""
-    config_dir = Path.home() / ".clausi"
-    config_dir.mkdir(exist_ok=True)
-    return config_dir / "config.yml"
-
 def create_default_config():
     """Create default config file if it doesn't exist."""
-    config_path = get_config_path()
+    config_path = config_module.get_config_path()
     if not config_path.exists():
         config = {
             "api_key": "",
@@ -128,7 +109,7 @@ def create_default_config():
                 "template": "default"
             },
             "regulations": {
-                "selected": list(REGULATIONS.keys())  # Default to all regulations
+                "selected": regs_module.get_regulation_choices()  # Default to all built-in regulations
             },
             "ui": {
                 "auto_open_findings": True,  # Auto-open findings.md in editor
@@ -143,29 +124,16 @@ def create_default_config():
         except Exception as e:
             console.print(f"[red]✗[/red] Error creating config file: {e}")
 
+# Use load_config and save_config from config_module
+# Note: config_module.load_config doesn't auto-create config, so we wrap it
 def load_config():
-    """Load configuration from file."""
-    config_path = get_config_path()
+    """Load configuration from file (auto-creates if missing)."""
+    config_path = config_module.get_config_path()
     if not config_path.exists():
         create_default_config()
-    
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        console.print(f"[red]✗[/red] Error loading config: {e}")
-        return None
+    return config_module.load_config()
 
-def save_config(config):
-    """Save configuration to file."""
-    config_path = get_config_path()
-    try:
-        with open(config_path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False)
-        return True
-    except Exception as e:
-        console.print(f"[red]Error saving config: {e}[/red]")
-        return False
+save_config = config_module.save_config
 
 def get_clausi_api_key():
     """Get Clausi API key from environment or config."""
@@ -199,16 +167,6 @@ def validate_openai_key(key: str) -> bool:
         console.print(f"[yellow]Warning: OpenAI key validation failed: {str(e)}[/yellow]")
         return False
 
-def ensure_output_dir(path: str, output_dir: Optional[str] = None) -> Path:
-    """Ensure output directory exists and return its path. Default to ./clausi/reports in the current working directory."""
-    if output_dir:
-        output_path = Path(output_dir)
-    else:
-        # Default to clausi/reports directory to avoid conflicts with existing project reports/
-        output_path = Path.cwd() / "clausi" / "reports"
-    output_path.mkdir(parents=True, exist_ok=True)
-    return output_path
-
 def save_audit_metadata(path: Path, metadata: Dict[str, Any]) -> None:
     """Save audit metadata to a JSON file."""
     metadata_path = path / "audit_metadata.json"
@@ -221,8 +179,149 @@ def copy_template_assets(template: str, output_path: Path) -> None:
     if template_dir.exists():
         shutil.copytree(template_dir, output_path / "assets", dirs_exist_ok=True)
 
+# Helper functions for scan command
+
+def _validate_and_get_api_key(provider: str, use_claude_code: bool, openai_key: Optional[str], model: str):
+    """Validate and return API key based on provider.
+
+    Returns:
+        tuple: (api_key, provider) or exits on validation failure
+    """
+    if use_claude_code:
+        console.print(f"\n[cyan]Using Claude Code CLI (free, no API costs)[/cyan]")
+        return None, "claude-code"
+
+    console.print(f"\n[cyan]Using AI: {provider} ({model})[/cyan]")
+
+    if provider == "claude":
+        api_key = config_module.get_anthropic_key()
+        if not api_key:
+            console.print("\n[bold yellow]Anthropic API Key Required[/bold yellow]")
+            console.print(f"\nTo use {provider}, you need to set up your Anthropic API key:")
+            console.print("\n1. Set it in environment:")
+            console.print("   [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]")
+            console.print("\n2. Or add to config:")
+            console.print("   [cyan]clausi config set --anthropic-key your-key-here[/cyan]")
+            console.print("\n3. Or use free Claude Code CLI:")
+            console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
+            console.print("\nYou can get your Anthropic API key from: [link=https://console.anthropic.com]https://console.anthropic.com[/link]")
+            sys.exit(1)
+        return api_key, provider
+    else:  # openai
+        api_key = openai_key or get_openai_key()
+        if not api_key:
+            console.print("\n[bold yellow]OpenAI API Key Required[/bold yellow]")
+            console.print("\nTo use OpenAI, you need to set up your OpenAI API key:")
+            console.print("\n1. Using the setup wizard:")
+            console.print("   [cyan]clausi setup[/cyan]")
+            console.print("\n2. Or directly set the key:")
+            console.print("   [cyan]clausi config set --openai-key your-key-here[/cyan]")
+            console.print("\n3. Or use free Claude Code CLI:")
+            console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
+            console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
+            sys.exit(1)
+
+        # Validate OpenAI key
+        if not validate_openai_key(api_key):
+            console.print("\n[bold yellow]Invalid OpenAI API Key[/bold yellow]")
+            console.print("\nThe provided OpenAI API key appears to be invalid. Please set a valid key using:")
+            console.print("\n[cyan]clausi config set --openai-key your-key-here[/cyan]")
+            console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
+            sys.exit(1)
+
+        return api_key, provider
+
+def _get_scan_regulations(regulation: Optional[tuple]) -> List[str]:
+    """Get list of regulations to scan against.
+
+    Returns:
+        List[str]: List of regulation codes
+    """
+    if regulation:
+        return list(regulation)
+    cfg = load_config()
+    return cfg.get("regulations", {}).get("selected", regs_module.get_regulation_choices())
+
+def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple],
+                         exclude_clauses: Optional[tuple], preset: Optional[str],
+                         regulations: List[str]):
+    """Handle clause scoping based on user options.
+
+    Returns:
+        tuple: (clauses_include, clauses_exclude)
+    """
+    clauses_include = None
+    clauses_exclude = None
+
+    if select_clauses:
+        # Interactive clause selection
+        target_reg = regulations[0] if len(regulations) == 1 else None
+        if not target_reg and len(regulations) > 1:
+            console.print(f"\n[yellow]Multiple regulations selected. Choose one for clause scoping:[/yellow]")
+            for i, reg in enumerate(regulations, 1):
+                console.print(f"  {i}. {REGULATIONS[reg]['name']}")
+            from rich.prompt import Prompt
+            choice = Prompt.ask("[cyan]Select regulation[/cyan]", default="1")
+            try:
+                target_reg = regulations[int(choice) - 1]
+            except (ValueError, IndexError):
+                target_reg = regulations[0]
+
+        clauses_include, clauses_exclude = clause_selector.select_clauses_interactive(target_reg)
+
+    elif include_clauses:
+        clauses_include = list(include_clauses)
+
+    elif exclude_clauses:
+        clauses_exclude = list(exclude_clauses)
+
+    elif preset:
+        target_reg = regulations[0]
+        clauses_include = clause_selector.get_preset_clauses(target_reg, preset)
+        if not clauses_include:
+            console.print(f"[yellow]Warning: Preset '{preset}' not found for {target_reg}. Scanning all clauses.[/yellow]")
+            available = clause_selector.list_available_presets(target_reg)
+            if available:
+                console.print(f"[cyan]Available presets:[/cyan] {', '.join(available)}")
+
+    # Display clause scope if specified
+    if clauses_include or clauses_exclude:
+        clause_selector.display_clause_scope_summary(clauses_include, clauses_exclude)
+
+    return clauses_include, clauses_exclude
+
+def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> List[dict]:
+    """Discover and filter files to analyze.
+
+    Returns:
+        List[dict]: List of file dictionaries
+    """
+    from clausi.utils.output import create_enhanced_progress_bar
+
+    with create_enhanced_progress_bar("Scanning project files...") as progress:
+        task = progress.add_task("Scanning project files...", total=None)
+        files = scanner.scan_directory(abs_path)
+        progress.update(task, completed=True)
+
+    if not files:
+        console.print("[yellow]No files found to analyze![/yellow]")
+        sys.exit(1)
+
+    console.print(f"Found {len(files)} files to analyze")
+
+    # Filter files based on .clausiignore and command-line ignore patterns
+    ignore_list = list(ignore) if ignore else None
+    files = scanner.filter_ignored_files(files, abs_path, ignore_list)
+
+    if not files:
+        console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
+        sys.exit(1)
+
+    console.print(f"Analyzing {len(files)} files after filtering")
+    return files
+
 @click.group()
-@click.version_option(version="1.0.0", prog_name="Clausi")
+@click.version_option(version=__version__, prog_name="Clausi")
 def cli():
     """Clausi - AI compliance auditing CLI.
 
@@ -258,7 +357,7 @@ def config():
 @click.option("--company-name", help="Set your company name for reports")
 @click.option("--company-logo", type=click.Path(exists=True), help="Set your company logo for reports")
 @click.option("--output-dir", type=click.Path(), help="Set default report output directory")
-@click.option("--regulations", multiple=True, type=click.Choice(list(REGULATIONS.keys())), help="Set selected regulations (can be given multiple times)")
+@click.option("--regulations", multiple=True, type=click.Choice(regs_module.get_regulation_choices()), help="Set selected regulations (can be given multiple times)")
 def set(openai_key: Optional[str], anthropic_key: Optional[str], ai_provider: Optional[str], ai_model: Optional[str],
         timeout: Optional[int], max_retries: Optional[int], company_name: Optional[str],
         company_logo: Optional[str], output_dir: Optional[str], regulations: Optional[List[str]]):
@@ -443,7 +542,7 @@ def list_models():
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--regulation", "--regulations", "-r", multiple=True, type=click.Choice(list(REGULATIONS.keys())), help="Regulation(s) to check against. Can be given multiple times, e.g. -r EU-AIA -r GDPR")
+@click.option("--regulation", "--regulations", "-r", multiple=True, type=click.Choice(regs_module.get_regulation_choices()), help="Regulation(s) to check against (built-in + custom). Can be given multiple times, e.g. -r EU-AIA -r GDPR")
 @click.option("--mode", type=click.Choice(["ai", "full"]), default="ai", help="Scanning mode (ai/full)")
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
 @click.option("--openai-key", help="OpenAI API key (overrides config)")
@@ -482,105 +581,18 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     provider = ai_provider or config_module.get_ai_provider()
     model = ai_model or config_module.get_ai_model(provider)
 
-    # Check if using Claude Code CLI (free mode)
-    if use_claude_code:
-        console.print(f"\n[cyan]Using Claude Code CLI (free, no API costs)[/cyan]")
-        api_key = None  # No API key needed for Claude Code CLI
-        openai_key = None
-        provider = "claude-code"  # Signal to backend to use Claude Code CLI
-    else:
-        console.print(f"\n[cyan]Using AI: {provider} ({model})[/cyan]")
+    # Validate and get API key
+    api_key, provider = _validate_and_get_api_key(provider, use_claude_code, openai_key, model)
+    # For backward compatibility, keep openai_key variable
+    openai_key = api_key
 
-        # Get appropriate API key based on provider
-        api_key = None
-        if provider == "claude":
-            api_key = config_module.get_anthropic_key()
-            if not api_key:
-                console.print("\n[bold yellow]Anthropic API Key Required[/bold yellow]")
-                console.print(f"\nTo use {provider}, you need to set up your Anthropic API key:")
-                console.print("\n1. Set it in environment:")
-                console.print("   [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]")
-                console.print("\n2. Or add to config:")
-                console.print("   [cyan]clausi config set --anthropic-key your-key-here[/cyan]")
-                console.print("\n3. Or use free Claude Code CLI:")
-                console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
-                console.print("\nYou can get your Anthropic API key from: [link=https://console.anthropic.com]https://console.anthropic.com[/link]")
-                sys.exit(1)
-        else:  # openai
-            # Use provided key or get from config
-            api_key = openai_key or get_openai_key()
-            if not api_key:
-                console.print("\n[bold yellow]OpenAI API Key Required[/bold yellow]")
-                console.print("\nTo use OpenAI, you need to set up your OpenAI API key:")
-                console.print("\n1. Using the setup wizard:")
-                console.print("   [cyan]clausi setup[/cyan]")
-                console.print("\n2. Or directly set the key:")
-                console.print("   [cyan]clausi config set --openai-key your-key-here[/cyan]")
-                console.print("\n3. Or use free Claude Code CLI:")
-                console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
-                console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
-                sys.exit(1)
-
-            # Validate OpenAI key
-            if not validate_openai_key(api_key):
-                console.print("\n[bold yellow]Invalid OpenAI API Key[/bold yellow]")
-                console.print("\nThe provided OpenAI API key appears to be invalid. Please set a valid key using:")
-                console.print("\n[cyan]clausi config set --openai-key your-key-here[/cyan]")
-                console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
-                sys.exit(1)
-
-        # For backward compatibility, keep openai_key variable
-        openai_key = api_key
-    
-    # Handle regulations (tuple -> list)
-    if regulation:
-        regulations = list(regulation)
-    else:
-        cfg = load_config()
-        regulations = cfg.get("regulations", {}).get("selected", list(REGULATIONS.keys()))
+    # Get regulations to scan against
+    regulations = _get_scan_regulations(regulation)
 
     # Handle clause scoping
-    clauses_include = None
-    clauses_exclude = None
-
-    if select_clauses:
-        # Interactive clause selection
-        # Note: For now we select based on first regulation, or prompt if multiple
-        target_reg = regulations[0] if len(regulations) == 1 else None
-        if not target_reg and len(regulations) > 1:
-            console.print(f"\n[yellow]Multiple regulations selected. Choose one for clause scoping:[/yellow]")
-            for i, reg in enumerate(regulations, 1):
-                console.print(f"  {i}. {REGULATIONS[reg]['name']}")
-            from rich.prompt import Prompt
-            choice = Prompt.ask("[cyan]Select regulation[/cyan]", default="1")
-            try:
-                target_reg = regulations[int(choice) - 1]
-            except (ValueError, IndexError):
-                target_reg = regulations[0]
-
-        clauses_include, clauses_exclude = clause_selector.select_clauses_interactive(target_reg)
-
-    elif include_clauses:
-        # Direct clause inclusion
-        clauses_include = list(include_clauses)
-
-    elif exclude_clauses:
-        # Direct clause exclusion
-        clauses_exclude = list(exclude_clauses)
-
-    elif preset:
-        # Use preset for first regulation
-        target_reg = regulations[0]
-        clauses_include = clause_selector.get_preset_clauses(target_reg, preset)
-        if not clauses_include:
-            console.print(f"[yellow]Warning: Preset '{preset}' not found for {target_reg}. Scanning all clauses.[/yellow]")
-            available = clause_selector.list_available_presets(target_reg)
-            if available:
-                console.print(f"[cyan]Available presets:[/cyan] {', '.join(available)}")
-
-    # Display clause scope if specified
-    if clauses_include or clauses_exclude:
-        clause_selector.display_clause_scope_summary(clauses_include, clauses_exclude)
+    clauses_include, clauses_exclude = _setup_clause_scoping(
+        select_clauses, include_clauses, exclude_clauses, preset, regulations
+    )
 
     # Set default template if not specified
     if not template:
@@ -605,38 +617,18 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
     console.print(f"Mode: {mode}")
     console.print(f"Minimum Severity: {min_severity}")
 
-    # Scan directory with enhanced progress
-    from clausi.utils.output import create_enhanced_progress_bar
+    # Discover and filter files
+    files = _discover_and_filter_files(abs_path, ignore)
 
-    with create_enhanced_progress_bar("Scanning project files...") as progress:
-        task = progress.add_task("Scanning project files...", total=None)
-        files = scanner.scan_directory(abs_path)
-        progress.update(task, completed=True)
-
-    if not files:
-        console.print("[yellow]No files found to analyze![/yellow]")
-        sys.exit(1)
-
-    console.print(f"Found {len(files)} files to analyze")
-
-    # Filter files based on .clausiignore and command-line ignore patterns
-    if ignore:
-        ignore_list = list(ignore)
-    else:
-        ignore_list = None
-
-    files = scanner.filter_ignored_files(files, abs_path, ignore_list)
-    
-    if not files:
-        console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
-        sys.exit(1)
-    
-    console.print(f"Analyzing {len(files)} files after filtering")
+    # Separate built-in and custom regulations
+    custom_regs_data = regs_module.get_custom_regulations_for_scan(regulations)
+    built_in_regs = [r for r in regulations if r not in [cr['code'] for cr in custom_regs_data]]
 
     # Prepare the initial request data for token estimation
     data = {
         "path": abs_path,  # Use absolute path
-        "regulations": regulations,
+        "regulations": built_in_regs,  # Only built-in regulations
+        "custom_regulations": custom_regs_data,  # Custom regulation YAML content
         "mode": mode,
         "min_severity": min_severity,
         "ai_provider": provider,  # NEW: AI provider selection
