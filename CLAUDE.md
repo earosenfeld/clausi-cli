@@ -2,10 +2,10 @@
 
 > **Purpose:** This document helps AI assistants understand the Clausi CLI architecture and make modifications safely and effectively.
 
-**Last Updated:** 2025-10-26
+**Last Updated:** 2025-12-07
 **Version:** 1.0.0
 **Language:** Python 3.8+
-**Framework:** Click (CLI), Rich (UI), Textual (TUI)
+**Framework:** Click (CLI), Rich (UI)
 
 ---
 
@@ -31,21 +31,22 @@ Clausi CLI is a **command-line interface** for AI compliance auditing. It submit
 ### High-Level Flow
 
 ```
-User → CLI Commands → File Discovery → Backend API → Report Generation
-                          ↓
-                   Token Estimation
-                          ↓
-                   Payment/Credits Flow
+User → Interactive Mode OR Direct Command → File Discovery → Backend API → Report Generation
+                                                  ↓
+                                           Token Estimation
+                                                  ↓
+                                         AI Provider Selection
 ```
 
 ### Core Responsibilities
 
-1. **File Discovery** - Scan directories, apply ignore patterns
-2. **Cost Estimation** - Calculate token usage before scanning
-3. **Payment Flow** - Handle BYOK (Bring Your Own Key) or Credits mode
-4. **API Communication** - Send requests to backend with appropriate headers
-5. **Report Display** - Download and display markdown/PDF reports
-6. **Configuration** - Manage API keys, settings, preferences
+1. **Interactive Mode** - Simple prompt-based interface for guided workflows
+2. **File Discovery** - Scan directories, apply ignore patterns
+3. **Cost Estimation** - Calculate token usage before scanning
+4. **AI Provider Selection** - Clausi AI (default), Claude (BYOK), or OpenAI (BYOK)
+5. **API Communication** - Send requests to backend with appropriate headers
+6. **Report Display** - Download and display markdown/PDF reports
+7. **Configuration** - Manage API keys, settings, preferences
 
 ---
 
@@ -76,15 +77,13 @@ clausi-cli/
 │   │   ├── emoji.py            # Cross-platform emoji/ASCII
 │   │   └── output.py           # Output formatting
 │   │
-│   ├── tui/                    # Terminal UI (Textual)
+│   ├── tui/                    # Terminal UI
 │   │   ├── __init__.py
-│   │   ├── app.py              # Main TUI application
+│   │   ├── interactive.py      # Simple interactive mode (Rich prompts)
+│   │   ├── app.py              # Legacy Textual TUI
 │   │   └── screens/
 │   │       ├── __init__.py
 │   │       └── config.py       # Config editor screen
-│   │
-│   ├── commands/               # Future: Custom commands
-│   │   └── __init__.py
 │   │
 │   └── templates/              # Report templates
 │       ├── default/
@@ -115,20 +114,24 @@ clausi-cli/
 #### Key Commands
 
 ```python
-@click.group()
-def cli():
-    """Main CLI group"""
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
+    """Main CLI group - launches interactive mode if no command given"""
+    if ctx.invoked_subcommand is None:
+        launch_interactive_mode()  # NEW: Interactive mode by default
 
 @cli.command()
-def scan(path, regulation, mode, ...):
-    """Main scan command - most complex"""
-    # 1. Validate API keys
-    # 2. Discover files
-    # 3. Get token estimate
-    # 4. Get user confirmation
-    # 5. Execute scan
-    # 6. Download reports
-    # 7. Display results
+def scan(path, claude_model, openai_model, ...):
+    """Main scan command"""
+    # 1. Determine provider (clausi/claude/openai) from flags
+    # 2. Validate API key (if needed)
+    # 3. Discover files
+    # 4. Get token estimate
+    # 5. Get user confirmation
+    # 6. Execute scan
+    # 7. Download reports
+    # 8. Display results
 
 @cli.group()
 def config():
@@ -138,17 +141,17 @@ def config():
 def setup():
     """First-time setup wizard"""
 
-@cli.group()
-def ui():
-    """TUI commands"""
+def launch_interactive_mode():
+    """Simple prompt-based interactive mode"""
+    # Menu options: scan, config, models, setup, help, quit
 ```
 
 #### Important Sections
 
-- **Lines 471-522:** AI provider selection and API key validation
-- **Lines 611-633:** Request data preparation
-- **Lines 635-695:** Token estimation flow
-- **Lines 697-851:** Scan execution and report handling
+- **Lines 184-241:** API key validation (new simplified logic)
+- **Lines 243-259:** Interactive mode launcher
+- **Lines 578-596:** Provider determination from --claude/--openai flags
+- **Lines 670-740:** Token estimation and scan execution
 
 ### 2. `clausi/core/payment.py` - Payment & Scan Requests
 
@@ -189,18 +192,22 @@ def check_payment_required(api_url, mode):
 
 #### Modular API Key Handling (CRITICAL)
 
-**Lines 187-195, 232-240:** Headers are constructed based on provider:
+**payment.py lines 232-240:** Headers are constructed based on provider:
 
 ```python
-if provider == "claude":
-    headers["X-Anthropic-Key"] = openai_key
-else:  # openai
-    headers["X-OpenAI-Key"] = openai_key
+# Only add API key header if we have one (not using Clausi hosted AI)
+if api_key:
+    if provider == "claude":
+        headers["X-Anthropic-Key"] = api_key
+    elif provider == "openai":
+        headers["X-OpenAI-Key"] = api_key
+# If provider == "clausi", no API key header is sent
 ```
 
-**Backend auto-detects provider from key prefix:**
-- `sk-ant-*` → Anthropic (ClaudeProvider)
-- `sk-*` or `sk-proj-*` → OpenAI (OpenAIProvider)
+**Three Provider Modes:**
+1. **`clausi`** - Clausi hosted AI (default, no API key required)
+2. **`claude`** - User's Anthropic API key (`sk-ant-*`)
+3. **`openai`** - User's OpenAI API key (`sk-*` or `sk-proj-*`)
 
 ### 3. `clausi/core/scanner.py` - File Discovery
 
@@ -300,62 +307,145 @@ def open_in_editor(file_path):
     """Open findings.md in user's default editor"""
 ```
 
+### 7. `clausi/tui/interactive.py` - Simple Interactive Mode
+
+**Purpose:** Prompt-based interactive interface for guided workflows
+
+#### Key Class
+
+```python
+class ClausInteractiveTUI:
+    """Simple interactive Clausi interface using Rich prompts"""
+
+    def run(self):
+        """Main loop - show menu and handle selections"""
+        # Options: scan, config, models, setup, help, quit
+
+    def scan_wizard(self):
+        """Interactive scan setup - asks for path, provider, regulations, etc."""
+
+    def config_menu(self):
+        """Configuration management - show/set/edit"""
+```
+
+**Usage:** Automatically launched when user runs `clausi` with no arguments
+
 ---
 
 ## Request Flow
 
-### 1. User Runs Scan Command
+### 1. User Interaction
 
+**Option A: Interactive Mode (Default)**
 ```bash
-clausi scan . --regulations EU-AIA --ai-provider claude
+clausi
+# User follows prompts to select path, provider, regulations, etc.
+```
+
+**Option B: Direct Command**
+```bash
+clausi scan . -r EU-AIA             # Uses Clausi AI (default)
+clausi scan . -r EU-AIA --claude    # Uses Claude with user's API key
+clausi scan . -r EU-AIA --openai gpt-4o  # Uses OpenAI with specific model
 ```
 
 ### 2. CLI Flow (`cli.py:scan()`)
 
 ```python
-# Step 1: Validate API key
-provider = "claude"
-api_key = config_module.get_anthropic_key()
-if not api_key:
-    console.print("API key required")
-    sys.exit(1)
+# Step 1: Determine provider from flags
+if claude_model is not None:
+    provider = "claude"
+    model = claude_model if claude_model != "" else config_module.get_ai_model("claude")
+elif openai_model is not None:
+    provider = "openai"
+    model = openai_model if openai_model != "" else config_module.get_ai_model("openai")
+else:
+    # Default: Clausi hosted AI (no API key needed)
+    provider = "clausi"
+    model = None
 
-# Step 2: Discover files
+# Step 2: Validate API key (only if using Claude or OpenAI)
+api_key = _validate_and_get_api_key(provider, model)
+# Returns None for "clausi" provider, API key for "claude"/"openai"
+
+# Step 3: Discover files
 files = scanner.scan_directory(path)
 files = scanner.filter_ignored_files(files, path, ignore_patterns)
 
-# Step 3: Prepare request data
+# Step 4: Prepare request data
 data = {
     "path": path,
     "regulations": ["EU-AIA"],
-    "ai_provider": "claude",
-    "ai_model": "claude-3-5-sonnet-20241022",
+    "ai_provider": provider,  # "clausi", "claude", or "openai"
+    "ai_model": model,        # Model name or None
     "files": files,
     "estimate_only": True
 }
 
-# Step 4: Get token estimate
-headers = {"X-Anthropic-Key": api_key, "Content-Type": "application/json"}
+# Step 5: Get token estimate
+headers = {"Content-Type": "application/json"}
+if api_key:  # Only add if using Claude or OpenAI
+    if provider == "claude":
+        headers["X-Anthropic-Key"] = api_key
+    elif provider == "openai":
+        headers["X-OpenAI-Key"] = api_key
+
 response = requests.post(f"{api_url}/api/clausi/estimate", json=data, headers=headers)
 estimate = response.json()
 
-# Step 5: Display estimate and get confirmation
+# Step 6: Display estimate and get confirmation
 console.print(f"Estimated Cost: ${estimate['estimated_cost']:.2f}")
 if not click.confirm("Proceed?"):
     sys.exit(0)
 
-# Step 6: Execute scan
+# Step 7: Execute scan
 data['estimate_only'] = False
-result = scan_module.make_scan_request(api_url, api_key, provider, data)
+result = scan_module.make_async_scan_request(api_url, api_key, provider, data)
 
-# Step 7: Download reports
-markdown_files = output.download_markdown_files(api_url, run_id, output_dir, api_key)
+# Step 8: Download reports
+markdown_files = download_markdown_files(api_url, run_id, output_dir, api_key)
 
-# Step 8: Display results
-output.display_findings_summary(findings_file)
+# Step 9: Display results
+console.print("[green]Scan complete![/green]")
 ```
 
-### 3. Backend API Endpoints
+### 3. Simplified CLI Flags (Important!)
+
+**Old Design (Removed):**
+```bash
+clausi scan . --ai-provider claude --ai-model claude-3-5-sonnet-20241022
+clausi scan . --use-claude-code  # Confusing name
+```
+
+**New Design (Current):**
+```bash
+# Default: Clausi hosted AI (no flag needed)
+clausi scan .
+
+# Use Claude with default model
+clausi scan . --claude
+
+# Use Claude with specific model
+clausi scan . --claude claude-3-5-sonnet-20241022
+
+# Use OpenAI with specific model
+clausi scan . --openai gpt-4o
+```
+
+**Key Changes:**
+- ❌ Removed `--use-claude-code` (was confusing, implied local execution)
+- ❌ Removed `--ai-provider` (redundant with specific flags)
+- ❌ Removed `--ai-model` (model is now the value of --claude/--openai)
+- ✅ Added `--claude [MODEL]` - Use Claude, optionally specify model
+- ✅ Added `--openai [MODEL]` - Use OpenAI, optionally specify model
+- ✅ Default behavior - Use Clausi hosted AI (no API key required)
+
+**Flag Logic:**
+- If neither `--claude` nor `--openai` is provided → `provider = "clausi"` (default)
+- If `--claude` is provided → `provider = "claude"`, model is the flag value or default
+- If `--openai` is provided → `provider = "openai"`, model is the flag value or default
+
+### 4. Backend API Endpoints
 
 #### `/api/clausi/estimate` (POST)
 ```json
@@ -488,14 +578,46 @@ REGULATIONS = {
 
 ### Adding a New AI Provider
 
-**1. Update CLI to accept provider:**
+**1. Add new CLI flag:**
 
-`clausi/cli.py:442`
+`clausi/cli.py` (around line 548)
 ```python
-@click.option("--ai-provider", type=click.Choice(["claude", "openai", "gemini"]))
+@click.option("--claude", "claude_model", default=None, help="Use Claude...")
+@click.option("--openai", "openai_model", default=None, help="Use OpenAI...")
+@click.option("--gemini", "gemini_model", default=None, help="Use Gemini (optionally specify model)")  # NEW
 ```
 
-**2. Add API key retrieval:**
+**2. Add provider detection logic:**
+
+`clausi/cli.py` (around line 580)
+```python
+if claude_model is not None:
+    provider = "claude"
+    model = claude_model if claude_model != "" else config_module.get_ai_model("claude")
+elif openai_model is not None:
+    provider = "openai"
+    model = openai_model if openai_model != "" else config_module.get_ai_model("openai")
+elif gemini_model is not None:  # NEW
+    provider = "gemini"
+    model = gemini_model if gemini_model != "" else config_module.get_ai_model("gemini")
+else:
+    provider = "clausi"  # Default
+    model = None
+```
+
+**3. Add API key validation:**
+
+`clausi/cli.py` in `_validate_and_get_api_key()` (around line 220)
+```python
+elif provider == "gemini":
+    api_key = config_module.get_gemini_key()
+    if not api_key:
+        # Show error message with instructions
+        sys.exit(1)
+    return api_key
+```
+
+**4. Add API key retrieval:**
 
 `clausi/utils/config.py`
 ```python
@@ -504,25 +626,25 @@ def get_gemini_key():
     key = os.getenv("GEMINI_API_KEY")
     if key:
         return key
-
     config = load_config()
     return config.get("api_keys", {}).get("gemini", "")
 ```
 
-**3. Update header logic:**
+**5. Update header logic:**
 
-`clausi/core/payment.py:187-195`
+`clausi/core/payment.py` (around line 238)
 ```python
-if provider == "claude":
-    headers["X-Anthropic-Key"] = openai_key
-elif provider == "openai":
-    headers["X-OpenAI-Key"] = openai_key
-elif provider == "gemini":
-    headers["X-Gemini-Key"] = openai_key
+if api_key:
+    if provider == "claude":
+        headers["X-Anthropic-Key"] = api_key
+    elif provider == "openai":
+        headers["X-OpenAI-Key"] = api_key
+    elif provider == "gemini":  # NEW
+        headers["X-Gemini-Key"] = api_key
 ```
 
-**4. Update backend:** (in backend repo)
-Backend's `ai_provider.py` needs to detect new key prefix pattern.
+**6. Update backend:** (in backend repo)
+Backend's `ai_provider.py` needs to detect new provider and key prefix pattern.
 
 ### Adding a New CLI Command
 
@@ -778,37 +900,52 @@ def scan(path, new_option):  # Breaking change - required parameter
 | What | Where |
 |------|-------|
 | Main CLI | `clausi/cli.py` |
+| Interactive mode | `clausi/tui/interactive.py` |
 | Scan requests | `clausi/core/payment.py` |
 | File discovery | `clausi/core/scanner.py` |
 | Config management | `clausi/utils/config.py` |
 | Emoji handling | `clausi/utils/emoji.py` |
 | Output formatting | `clausi/utils/output.py` |
 | API client | `clausi/api/client.py` |
-| TUI app | `clausi/tui/app.py` |
 
-### Important Lines
+### Important Functions
 
 | What | File:Lines |
 |------|-----------|
-| Main scan function | `cli.py:458-858` |
-| API key validation | `cli.py:471-522` |
-| Token estimation | `cli.py:635-695` |
-| Scan request | `payment.py:218-282` |
-| Error handling | `payment.py:100-146, 256-282` |
-| Header construction | `payment.py:187-195, 232-240` |
-| Config loading | `config.py:various` |
+| Interactive mode launcher | `cli.py:243-259` |
+| Provider determination | `cli.py:578-596` |
+| API key validation | `cli.py:184-241` |
+| Main scan function | `cli.py:565-900` |
+| Token estimation | `cli.py:670-740` |
+| Async scan request | `payment.py:216-330` |
+| Header construction | `payment.py:232-240` |
+| Error handling | `payment.py:various` |
 
 ### Key Dependencies
 
 | Package | Purpose |
 |---------|---------|
 | `click` | CLI framework |
-| `rich` | Terminal formatting |
+| `rich` | Terminal formatting and prompts |
 | `requests` | HTTP client |
 | `pyyaml` | Config file parsing |
 | `pathspec` | .gitignore-style patterns |
-| `textual` | Terminal UI framework |
+| `textual` | TUI framework (legacy) |
 | `openai` | OpenAI SDK (key validation) |
+
+### Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `clausi` | Launch interactive mode |
+| `clausi scan .` | Scan current directory (Clausi AI) |
+| `clausi scan . --claude` | Scan with Claude (your API key) |
+| `clausi scan . --openai gpt-4o` | Scan with OpenAI |
+| `clausi scan . -r EU-AIA -r GDPR` | Multi-regulation scan |
+| `clausi scan . --preset critical-only` | Scoped scan |
+| `clausi config show` | View configuration |
+| `clausi config set --anthropic-key <key>` | Set API key |
+| `clausi models list` | List available models |
 
 ---
 
@@ -874,3 +1011,13 @@ clausi --help
 **End of CLAUDE.md**
 
 *This document should be updated whenever significant architectural changes are made to the CLI.*
+
+---
+
+## Recent Changes (2025-12-07)
+
+1. **Interactive Mode** - Running `clausi` with no args now launches a simple interactive menu
+2. **Simplified Flags** - Removed `--use-claude-code`, `--ai-provider`, `--ai-model`; added `--claude [MODEL]` and `--openai [MODEL]`
+3. **Default Provider** - Default is now "clausi" (hosted AI, no API key required)
+4. **Provider Logic** - Simplified to three modes: clausi (default), claude (BYOK), openai (BYOK)
+5. **Interactive UI** - New `clausi/tui/interactive.py` with Rich-based prompts instead of Textual

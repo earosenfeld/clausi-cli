@@ -4,9 +4,16 @@ import os
 from pathlib import Path
 import sys
 
-# Import version from package
-sys.path.insert(0, str(Path(__file__).parent))
-from clausi import __version__
+# Read version from package without importing (avoids dependency issues)
+version_file = Path(__file__).parent / "clausi" / "__init__.py"
+__version__ = None
+with open(version_file) as f:
+    for line in f:
+        if line.startswith("__version__"):
+            __version__ = line.split("=")[1].strip().strip('"').strip("'")
+            break
+if __version__ is None:
+    __version__ = "1.0.0"
 
 class PostUninstallCommand(Command):
     """Post-uninstall command to remove config directory."""
@@ -153,6 +160,7 @@ setup(
         "openai>=1.0.0",
         "pathspec>=0.10.0",
         "textual>=0.47.0",  # TUI framework
+        "questionary>=2.0.0",  # Arrow key menu navigation
     ],
     entry_points={
         "console_scripts": [

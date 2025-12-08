@@ -232,11 +232,11 @@ def make_async_scan_request(api_url: str, openai_key: str, provider: str, data: 
         # Prepare headers with appropriate API key header based on provider
         headers = {"Content-Type": "application/json"}
 
-        # Only add API key header if we have one (not using Claude Code CLI)
+        # Only add API key header if we have one (not using Clausi hosted AI)
         if openai_key:
             if provider == "claude":
                 headers["X-Anthropic-Key"] = openai_key
-            else:  # openai
+            elif provider == "openai":
                 headers["X-OpenAI-Key"] = openai_key
 
         # Add token if available
@@ -349,12 +349,12 @@ def make_scan_request(api_url: str, openai_key: str, provider: str, data: Dict[s
         # Prepare headers with appropriate API key header based on provider
         headers = {"Content-Type": "application/json"}
 
-        # Only add API key header if we have one (not using Claude Code CLI)
+        # Only add API key header if we have one (not using Clausi hosted AI)
         if openai_key:
             # Use correct header name based on provider (modular approach)
             if provider == "claude":
                 headers["X-Anthropic-Key"] = openai_key
-            else:  # openai
+            elif provider == "openai":
                 headers["X-OpenAI-Key"] = openai_key
 
         # Add token if available

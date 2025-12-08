@@ -181,34 +181,44 @@ def copy_template_assets(template: str, output_path: Path) -> None:
 
 # Helper functions for scan command
 
-def _validate_and_get_api_key(provider: str, use_claude_code: bool, openai_key: Optional[str], model: str):
+def _validate_and_get_api_key(provider: str, model: Optional[str] = None):
     """Validate and return API key based on provider.
 
+    Args:
+        provider: AI provider ("clausi", "claude", or "openai")
+        model: Optional model name
+
     Returns:
-        tuple: (api_key, provider) or exits on validation failure
+        str or None: API key (None for Clausi hosted AI)
     """
-    if use_claude_code:
-        console.print(f"\n[cyan]Using Claude Code CLI (free, no API costs)[/cyan]")
-        return None, "claude-code"
+    # Clausi hosted AI - no API key required
+    if provider == "clausi":
+        console.print(f"\n[cyan]Using Clausi AI (no API key required)[/cyan]")
+        return None
 
-    console.print(f"\n[cyan]Using AI: {provider} ({model})[/cyan]")
+    # Display which provider and model is being used
+    model_display = f" ({model})" if model else ""
+    console.print(f"\n[cyan]Using {provider.title()}{model_display} with your API key[/cyan]")
 
+    # Claude provider - requires Anthropic API key
     if provider == "claude":
         api_key = config_module.get_anthropic_key()
         if not api_key:
             console.print("\n[bold yellow]Anthropic API Key Required[/bold yellow]")
-            console.print(f"\nTo use {provider}, you need to set up your Anthropic API key:")
+            console.print(f"\nTo use Claude, you need to set up your Anthropic API key:")
             console.print("\n1. Set it in environment:")
             console.print("   [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]")
             console.print("\n2. Or add to config:")
             console.print("   [cyan]clausi config set --anthropic-key your-key-here[/cyan]")
-            console.print("\n3. Or use free Claude Code CLI:")
-            console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
+            console.print("\n3. Or use Clausi hosted AI (default):")
+            console.print("   [cyan]clausi scan /path[/cyan]")
             console.print("\nYou can get your Anthropic API key from: [link=https://console.anthropic.com]https://console.anthropic.com[/link]")
             sys.exit(1)
-        return api_key, provider
-    else:  # openai
-        api_key = openai_key or get_openai_key()
+        return api_key
+
+    # OpenAI provider - requires OpenAI API key
+    elif provider == "openai":
+        api_key = get_openai_key()
         if not api_key:
             console.print("\n[bold yellow]OpenAI API Key Required[/bold yellow]")
             console.print("\nTo use OpenAI, you need to set up your OpenAI API key:")
@@ -216,8 +226,8 @@ def _validate_and_get_api_key(provider: str, use_claude_code: bool, openai_key: 
             console.print("   [cyan]clausi setup[/cyan]")
             console.print("\n2. Or directly set the key:")
             console.print("   [cyan]clausi config set --openai-key your-key-here[/cyan]")
-            console.print("\n3. Or use free Claude Code CLI:")
-            console.print("   [cyan]clausi scan /path --use-claude-code[/cyan]")
+            console.print("\n3. Or use Clausi hosted AI (default):")
+            console.print("   [cyan]clausi scan /path[/cyan]")
             console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
             sys.exit(1)
 
@@ -228,8 +238,37 @@ def _validate_and_get_api_key(provider: str, use_claude_code: bool, openai_key: 
             console.print("\n[cyan]clausi config set --openai-key your-key-here[/cyan]")
             console.print("\nYou can get your OpenAI API key from: [link=https://platform.openai.com/api-keys]https://platform.openai.com/api-keys[/link]")
             sys.exit(1)
+        return api_key
 
-        return api_key, provider
+def launch_interactive_mode():
+    """Launch interactive TUI interface."""
+    try:
+        from clausi.tui.interactive import ClausInteractiveTUI
+        console.print("[cyan]Launching Clausi interactive mode...[/cyan]\n")
+        app = ClausInteractiveTUI()
+        app.run()
+    except ImportError as e:
+        console.print(f"[red]Error: Missing dependency[/red]")
+        console.print(f"[dim]{str(e)}[/dim]")
+        console.print("\nInstall with: pip install questionary")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Exiting Clausi...[/yellow]")
+        sys.exit(0)
+    except Exception as e:
+        error_msg = str(e)
+        # Handle Windows terminal compatibility issues
+        if "xterm-256color" in error_msg or "Windows console" in error_msg:
+            console.print(f"[red]Terminal Compatibility Issue[/red]")
+            console.print("\nThe interactive mode requires a proper terminal environment.")
+            console.print("\n[yellow]Try one of these solutions:[/yellow]")
+            console.print("  1. Run from Command Prompt (cmd.exe) instead of Git Bash/WSL")
+            console.print("  2. Run from PowerShell")
+            console.print("  3. Use direct commands instead: clausi scan --help")
+            sys.exit(1)
+        else:
+            console.print(f"[red]Error launching interactive mode: {error_msg}[/red]")
+            sys.exit(1)
 
 def _get_scan_regulations(regulation: Optional[tuple]) -> List[str]:
     """Get list of regulations to scan against.
@@ -320,27 +359,33 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> List[d
     console.print(f"Analyzing {len(files)} files after filtering")
     return files
 
-@click.group()
+@click.group(invoke_without_command=True)
+@click.pass_context
 @click.version_option(version=__version__, prog_name="Clausi")
-def cli():
+def cli(ctx):
     """Clausi - AI compliance auditing CLI.
 
     A professional tool for auditing AI systems against regulatory requirements.
 
     \b
     Getting Started:
-      1. Configure your API key:    clausi setup
-      2. Run your first scan:       clausi scan --regulations EU-AIA
-      3. Interactive config:        clausi ui config
+      1. Just run:                  clausi
+      2. Or scan directly:          clausi scan . -r EU-AIA
+      3. Configure API keys:        clausi setup
 
     \b
     Quick Examples:
-      clausi scan --regulations EU-AIA GDPR --format pdf
-      clausi scan --preset critical-only --open-findings
-      clausi models list
+      clausi                                    # Interactive mode
+      clausi scan . -r EU-AIA -r GDPR          # Scan with Clausi AI
+      clausi scan . --claude                   # Scan with Claude
+      clausi scan . --openai gpt-4o            # Scan with OpenAI
     """
     # Create default config on first run
     create_default_config()
+
+    # If no command provided, launch interactive mode
+    if ctx.invoked_subcommand is None:
+        launch_interactive_mode()
 
 @cli.group()
 def config():
@@ -390,14 +435,14 @@ def set(openai_key: Optional[str], anthropic_key: Optional[str], ai_provider: Op
     if regulations:
         config.setdefault("regulations", {})["selected"] = list(regulations)
 
-    if save_config(config):
+    if config_module.save_config(config):
         console.print("[green]Configuration updated successfully[/green]")
 
 @config.command()
 def show():
     """Show current configuration."""
-    console.print(f"Configuration file path: [bold]{get_config_path()}[/bold]\n")
-    config = load_config()
+    console.print(f"Configuration file path: [bold]{config_module.get_config_path()}[/bold]\n")
+    config = config_module.load_config()
     if not config:
         return
 
@@ -431,9 +476,9 @@ def show():
 
     # Add API settings
     api = config.get("api", {})
-    
+
     # Show API URL with tunnel indicator
-    current_api_url = get_api_url()
+    current_api_url = config_module.get_api_url()
     tunnel_base = os.getenv('CLAUSI_TUNNEL_BASE')
     if tunnel_base:
         api_url_display = f"{current_api_url} (via CLAUSI_TUNNEL_BASE)"
@@ -462,7 +507,7 @@ def show():
 @config.command()
 def path():
     """Print the full path to the configuration file."""
-    console.print(f"Configuration file path: [bold]{get_config_path()}[/bold]")
+    console.print(f"Configuration file path: [bold]{config_module.get_config_path()}[/bold]")
 
 @cli.group()
 def models():
@@ -545,10 +590,8 @@ def list_models():
 @click.option("--regulation", "--regulations", "-r", multiple=True, type=click.Choice(regs_module.get_regulation_choices()), help="Regulation(s) to check against (built-in + custom). Can be given multiple times, e.g. -r EU-AIA -r GDPR")
 @click.option("--mode", type=click.Choice(["ai", "full"]), default="ai", help="Scanning mode (ai/full)")
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
-@click.option("--openai-key", help="OpenAI API key (overrides config)")
-@click.option("--use-claude-code", is_flag=True, help="Use free Claude Code CLI (no API key required)")
-@click.option("--ai-provider", type=click.Choice(["claude", "openai"]), help="AI provider to use (default: from config or claude)")
-@click.option("--ai-model", type=str, help="Specific AI model to use")
+@click.option("--claude", "claude_model", default=None, help="Use Claude with your API key (optionally specify model: --claude claude-3-5-sonnet-20241022)")
+@click.option("--openai", "openai_model", default=None, help="Use OpenAI with your API key (optionally specify model: --openai gpt-4o)")
 @click.option("--select-clauses", is_flag=True, help="Interactively select clauses to scan")
 @click.option("--include", "include_clauses", multiple=True, help="Include specific clauses (can be given multiple times, e.g. --include EUAIA-3.1)")
 @click.option("--exclude", "exclude_clauses", multiple=True, help="Exclude specific clauses (can be given multiple times)")
@@ -564,8 +607,8 @@ def list_models():
 @click.option("--open-findings", is_flag=True, help="Auto-open findings.md in default editor after scan")
 @click.option("--show-markdown", is_flag=True, help="Display markdown findings summary in terminal")
 @click.option("--show-cache-stats/--no-cache-stats", default=None, help="Show/hide cache statistics (default: from config)")
-def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional[str], openai_key: Optional[str],
-          use_claude_code: bool, ai_provider: Optional[str], ai_model: Optional[str], select_clauses: bool, include_clauses: Optional[List[str]],
+def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional[str], claude_model: Optional[str],
+          openai_model: Optional[str], select_clauses: bool, include_clauses: Optional[List[str]],
           exclude_clauses: Optional[List[str]], preset: Optional[str], format: str, template: Optional[str], verbose: bool,
           skip_confirmation: bool, max_cost: Optional[float], show_details: bool, min_severity: str, ignore: Optional[List[str]],
           open_findings: bool, show_markdown: bool, show_cache_stats: Optional[bool]):
@@ -577,14 +620,25 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
         if not scan_module.check_payment_required(api_url, mode):
             return  # Exit if payment required
 
-    # Determine AI provider
-    provider = ai_provider or config_module.get_ai_provider()
-    model = ai_model or config_module.get_ai_model(provider)
+    # Determine AI provider and model from new simplified flags
+    # Priority: --claude/--openai flags > config > default (clausi)
+    if claude_model is not None:
+        # User specified --claude flag
+        provider = "claude"
+        # If --claude has a value, it's the model; otherwise use default
+        model = claude_model if claude_model != "" else config_module.get_ai_model("claude")
+    elif openai_model is not None:
+        # User specified --openai flag
+        provider = "openai"
+        # If --openai has a value, it's the model; otherwise use default
+        model = openai_model if openai_model != "" else config_module.get_ai_model("openai")
+    else:
+        # Default: use Clausi hosted AI (no API key required)
+        provider = "clausi"
+        model = None  # Not needed for Clausi hosted AI
 
     # Validate and get API key
-    api_key, provider = _validate_and_get_api_key(provider, use_claude_code, openai_key, model)
-    # For backward compatibility, keep openai_key variable
-    openai_key = api_key
+    api_key = _validate_and_get_api_key(provider, model)
 
     # Get regulations to scan against
     regulations = _get_scan_regulations(regulation)
@@ -655,12 +709,12 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
 
         # Construct headers with appropriate API key header based on provider
         headers = {"Content-Type": "application/json"}
-        # Only add API key header if we have one (not using Claude Code CLI)
-        if openai_key:
+        # Only add API key header if we have one (not using Clausi hosted AI)
+        if api_key:
             if provider == "claude":
-                headers["X-Anthropic-Key"] = openai_key  # Note: variable name is openai_key for backward compatibility
-            else:  # openai
-                headers["X-OpenAI-Key"] = openai_key
+                headers["X-Anthropic-Key"] = api_key
+            elif provider == "openai":
+                headers["X-OpenAI-Key"] = api_key
 
         response = requests.post(
             f"{api_url}/api/clausi/estimate",
@@ -721,7 +775,7 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
 
         try:
             # Use async scan request (with job polling) to prevent timeouts on large scans
-            result = scan_module.make_async_scan_request(get_api_url(), openai_key, provider, data)
+            result = scan_module.make_async_scan_request(get_api_url(), api_key, provider, data)
             if not result:
                 console.print("[red]Scan failed[/red]")
                 sys.exit(1)
@@ -736,8 +790,8 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
                     try:
                         # Download report from backend
                         headers = {}
-                        if openai_key:
-                            headers["Authorization"] = f"Bearer {openai_key}"
+                        if api_key:
+                            headers["Authorization"] = f"Bearer {api_key}"
                         response = requests.get(
                             f"{get_api_url()}/api/clausi/report/{report_filename}",
                             headers=headers,
@@ -843,7 +897,7 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
                     api_url=get_api_url(),
                     run_id=run_id,
                     output_dir=output_path,
-                    api_key=openai_key
+                    api_key=api_key
                 )
 
                 if markdown_files:
@@ -942,14 +996,14 @@ def setup():
             "max_retries": 3
         }
     }
-    if save_config(config):
+    if config_module.save_config(config):
         console.print("[green]✓[/green] Setup completed successfully!")
         console.print("\nYou can now use 'clausi scan' to start scanning your projects.")
 
 @config.command()
 def edit():
     """Open the configuration file in your default editor (uses $EDITOR or Notepad)."""
-    path = get_config_path()
+    path = config_module.get_config_path()
     editor = os.getenv("EDITOR") or ("notepad" if os.name == "nt" else "vi")
     console.print(f"Opening config file: [bold]{path}[/bold] with [cyan]{editor}[/cyan]")
     try:
