@@ -2,7 +2,7 @@
 
 > **Purpose:** Comprehensive guide for AI assistants working on Clausi CLI development
 >
-> **Last Updated:** 2025-12-08
+> **Last Updated:** 2025-12-24
 > **Version:** 1.0.0
 > **Language:** Python 3.8+
 > **Framework:** Click (CLI), Rich (UI), Questionary (Interactive)
@@ -697,18 +697,22 @@ def check_payment_required(api_url: str, mode: str = "full") -> bool:
 ```
 User runs scan
     ↓
-check_payment_required()
+Check for saved token
     ↓
-    ├─→ payment_required=true → Open Stripe checkout → Exit
+    ├─→ No token → Auto-start login flow
+    │       ↓
+    │   clausi login (OAuth)
+    │       ↓
+    │   Token saved → Continue
     │
-    └─→ payment_required=false → Continue
+    └─→ Token exists → Continue
             ↓
         make_async_scan_request()
             ↓
         POST /scan/async
             ↓
             ├─→ 200: Success → Return result
-            ├─→ 401: Trial created → Save token → Retry
+            ├─→ 401: Token expired → Prompt re-login → Exit
             ├─→ 402: Payment required → Open checkout → Exit
             ├─→ 524: Timeout → Show helpful message → Exit
             └─→ 5xx: Server error → Show error → Exit
@@ -719,156 +723,162 @@ check_payment_required()
 ### interactive.py - Interactive Mode
 
 **File:** `clausi/tui/interactive.py`
-**Lines:** ~250
-**Library:** Questionary (arrow key navigation)
+**Lines:** ~300
+**Library:** Questionary (arrow key navigation), tkinter (native file dialog)
 **Purpose:** Beginner-friendly guided workflow
 
-#### Key Class
+#### Key Features
+
+1. **Native File Explorer** - Opens OS file picker (Windows/Mac/Linux)
+2. **Terminal Directory Browser** - Arrow-key navigation through folders
+3. **Path Autocomplete** - Type path with tab completion
+4. **Graceful Fallbacks** - If native dialog fails, falls back to terminal
+
+#### Path Selection Flow
 
 ```python
-class ClausInteractiveTUI:
-    """Interactive Clausi interface with numbered menu and arrow key navigation"""
+def select_path(self) -> str | None:
+    """Let user choose how to specify the path to scan."""
+    choices = [
+        "1. Current directory (.)",
+        "2. Open file explorer...",      # Native OS dialog (tkinter)
+        "3. Browse in terminal...",       # Arrow-key directory browser
+        "4. Type path manually"           # Text input with autocomplete
+    ]
+    # ...
+```
 
-    def __init__(self):
-        self.console = Console()
+#### Native File Dialog
 
-    def run(self):
-        """Main loop"""
-        while True:
-            choice = self.show_main_menu()
+```python
+def open_native_file_dialog() -> str | None:
+    """Open native OS file explorer dialog to select a folder."""
+    import tkinter as tk
+    from tkinter import filedialog
 
-            if choice is None:  # User pressed ESC
-                return
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    root.attributes('-topmost', True)  # Bring dialog to front
 
-            # Strip number prefix "1. " → ""
-            choice = choice.split(". ", 1)[1] if ". " in choice else choice
+    folder_path = filedialog.askdirectory(
+        title="Select Project Folder",
+        initialdir=os.getcwd()
+    )
+    root.destroy()
+    return folder_path if folder_path else None
+```
 
-            if "Scan a project" in choice:
-                self.scan_wizard()
-            elif "View configuration" in choice:
-                self.show_config()
-            elif "List available" in choice:
-                self.show_models()
-            elif "setup wizard" in choice:
-                self.run_setup()
-            elif "Show help" in choice:
-                self.show_help()
-            elif "Exit" in choice:
-                break
+#### Terminal Directory Browser
 
-    def show_main_menu(self):
-        """Display main menu with arrow key navigation"""
-        return questionary.select(
-            "What would you like to do?",
-            choices=[
-                "1. Scan a project for compliance",
-                "2. View configuration",
-                "3. List available AI models",
-                "4. Run setup wizard",
-                "5. Show help",
-                "6. Exit Clausi"
-            ],
-            qmark="",
-            pointer="→"
-        ).ask()
+```python
+def browse_directory(self, start_path: str = ".") -> str | None:
+    """Interactive directory browser with arrow keys."""
+    # Shows:
+    # - .. (parent directory)
+    # - [Select this folder: current_name]
+    # - subdirectory1/
+    # - subdirectory2/
+    # Navigate with arrows, Enter to select
+```
 
-    def scan_wizard(self):
-        """Interactive scan setup"""
+#### AI Provider Selection
 
-        # Step 1: Get path
-        path = questionary.path(
-            "Path to scan:",
-            default=".",
-            only_directories=True
-        ).ask()
+```python
+provider_choices = [
+    "1. Clausi AI (no API key needed, pay per scan)",
+    "2. Claude (bring your own Anthropic API key + $0.50 fee)",
+    "3. OpenAI (bring your own OpenAI API key + $0.50 fee)"
+]
+provider_choice = questionary.select(
+    "Select AI provider:",
+    choices=provider_choices,
+    qmark="",
+    pointer="→"
+).ask()
 
-        if path is None:  # User cancelled
-            return
+if provider_choice is None:
+    return
 
-        # Step 2: Select AI provider
-        provider_choice = questionary.select(
-            "Select AI provider:",
-            choices=[
-                "1. Clausi AI (free, no API key required)",
-                "2. Claude (requires Anthropic API key)",
-                "3. OpenAI (requires OpenAI API key)"
-            ]
-        ).ask()
+# Strip number prefix and map to provider flag
+provider_choice = provider_choice.split(". ", 1)[1]
+provider_flags = {
+    "Clausi AI (no API key needed, pay per scan)": "",
+    "Claude (bring your own Anthropic API key + $0.50 fee)": "--claude",
+    "OpenAI (bring your own OpenAI API key + $0.50 fee)": "--openai gpt-4o"
+}
+provider_flag = provider_flags[provider_choice]
 
-        if provider_choice is None:
-            return
+# Step 3: Select regulations
+reg_choice = questionary.select(
+    "Select regulations:",
+    choices=[
+        "1. EU AI Act only",
+        "2. EU AI Act + GDPR",
+        "3. All regulations (EU-AIA, GDPR, ISO-42001, HIPAA, SOC2)",
+        "4. Custom selection"
+    ],
+    qmark="",
+    pointer="→"
+).ask()
 
-        # Map to provider flag
-        if "Clausi AI" in provider_choice:
-            provider_flag = ""
-        elif "Claude" in provider_choice:
-            provider_flag = "--claude"
-        elif "OpenAI" in provider_choice:
-            provider_flag = "--openai"
+if reg_choice is None:
+    return
 
-        # Step 3: Select regulations
-        reg_choice = questionary.select(
-            "Select regulations:",
-            choices=[
-                "1. EU AI Act only",
-                "2. EU AI Act + GDPR",
-                "3. All regulations",
-                "4. Custom selection"
-            ]
-        ).ask()
+# Strip prefix and map to -r flags
+reg_choice = reg_choice.split(". ", 1)[1]
+if reg_choice == "EU AI Act only":
+    reg_flags = "-r EU-AIA"
+elif reg_choice == "EU AI Act + GDPR":
+    reg_flags = "-r EU-AIA -r GDPR"
+elif "All regulations" in reg_choice:
+    reg_flags = "-r EU-AIA -r GDPR -r ISO-42001 -r HIPAA -r SOC2"
+# ... etc
 
-        if reg_choice is None:
-            return
+# Step 4: Preset selection
+preset_choice = questionary.select(
+    "Additional options:",
+    choices=[
+        "1. Standard scan (all clauses)",
+        "2. Critical-only preset (faster, cheaper)",
+        "3. High-priority preset"
+    ],
+    qmark="",
+    pointer="→"
+).ask()
 
-        # Map to -r flags
-        if "EU AI Act only" in reg_choice:
-            reg_flags = "-r EU-AIA"
-        elif "EU AI Act + GDPR" in reg_choice:
-            reg_flags = "-r EU-AIA -r GDPR"
-        # ... etc
+if preset_choice is None:
+    return
 
-        # Step 4: Preset selection
-        preset_choice = questionary.select(
-            "Additional options:",
-            choices=[
-                "1. Standard scan (all clauses)",
-                "2. Critical-only preset",
-                "3. High-priority preset"
-            ]
-        ).ask()
+# Strip prefix and map to --preset flag
+preset_choice = preset_choice.split(". ", 1)[1]
+if "Critical-only" in preset_choice:
+    preset_flag = "--preset critical-only"
+elif "High-priority" in preset_choice:
+    preset_flag = "--preset high-priority"
+else:
+    preset_flag = ""
 
-        if preset_choice is None:
-            return
+# Build command
+cmd_parts = ["clausi", "scan"]
 
-        # Map to --preset flag
-        if "Critical-only" in preset_choice:
-            preset_flag = "--preset critical-only"
-        elif "High-priority" in preset_choice:
-            preset_flag = "--preset high-priority"
-        else:
-            preset_flag = ""
+# Quote path if it contains spaces
+if " " in path:
+    cmd_parts.append(f'"{path}"')
+else:
+    cmd_parts.append(path)
 
-        # Build command
-        cmd_parts = ["clausi", "scan"]
+cmd_parts.extend(reg_flags.split())
+if provider_flag:
+    cmd_parts.extend(provider_flag.split())
+if preset_flag:
+    cmd_parts.extend(preset_flag.split())
+cmd_parts.append("--open-findings")
 
-        # Quote path if it contains spaces
-        if " " in path:
-            cmd_parts.append(f'"{path}"')
-        else:
-            cmd_parts.append(path)
+cmd = " ".join(cmd_parts)
 
-        cmd_parts.extend(reg_flags.split())
-        if provider_flag:
-            cmd_parts.extend(provider_flag.split())
-        if preset_flag:
-            cmd_parts.extend(preset_flag.split())
-        cmd_parts.append("--open-findings")
-
-        cmd = " ".join(cmd_parts)
-
-        # Show command and execute
-        console.print(f"\n[dim]Running: {cmd}[/dim]\n")
-        os.system(cmd)
+# Show command and execute
+console.print(f"\n[dim]Running: {cmd}[/dim]\n")
+os.system(cmd)
 ```
 
 #### Features
@@ -1225,19 +1235,24 @@ if api_key:
 
 ```python
 # In scan_wizard()
+provider_choices = [
+    "1. Clausi AI (no API key needed, pay per scan)",
+    "2. Claude (bring your own Anthropic API key + $0.50 fee)",
+    "3. OpenAI (bring your own OpenAI API key + $0.50 fee)",
+    "4. Gemini (bring your own Google API key + $0.50 fee)"  # NEW
+]
 provider_choice = questionary.select(
     "Select AI provider:",
-    choices=[
-        "1. Clausi AI (free, no API key required)",
-        "2. Claude (requires Anthropic API key)",
-        "3. OpenAI (requires OpenAI API key)",
-        "4. Gemini (requires Google API key)"  # NEW
-    ]
+    choices=provider_choices,
+    qmark="",
+    pointer="→"
 ).ask()
 
-# Add mapping
-elif "Gemini" in provider_choice:
-    provider_flag = "--gemini"
+# Add mapping in provider_flags dict
+provider_flags = {
+    # ... existing mappings ...
+    "Gemini (bring your own Google API key + $0.50 fee)": "--gemini"  # NEW
+}
 ```
 
 **Step 7: Test**
@@ -1869,6 +1884,40 @@ tar -tzf dist/clausi-*.tar.gz | grep new_feature  # Verify it's there
 
 ### Recent Changes
 
+#### 2025-12-24 - Production Ready Release
+
+**Interactive Mode Enhancements:**
+- Added native file explorer dialog (tkinter) for folder selection
+- Added terminal-based directory browser as fallback
+- Path selection now offers 4 options:
+  1. Current directory (.)
+  2. Open file explorer...
+  3. Browse in terminal...
+  4. Type path manually
+
+**Payment Flow Updates:**
+- Added auto-login flow when no token found
+- Removed test card display (was showing Stripe test card 4242...)
+- Improved session expiry handling with clear re-login prompts
+
+**Pricing Messaging (Hybrid Approach):**
+- CLI now shows $ amounts only (no tokens/credits visible to users)
+- Updated provider labels: "Clausi AI (no API key needed, pay per scan)"
+- BYOK options show platform fee: "+ $0.50 fee"
+- Renamed `clausi tokens` command to `clausi balance`
+
+**Code Cleanup:**
+- Removed duplicate `get_openai_key()` wrapper from cli.py
+- Removed unused `rprint` import
+- Removed deprecated `show_token_status()` function
+- Fixed hardcoded emoji to use `emoji()` function
+
+**New Files:**
+- `CLAUDE/REFACTORING_PLAN.md` - Production refactoring roadmap
+- `CLAUDE/REFACTORING_PROGRESS.md` - Progress tracker
+
+---
+
 #### 2025-12-08 - Documentation Consolidation
 
 **Changes:**
@@ -1953,6 +2002,6 @@ tar -tzf dist/clausi-*.tar.gz | grep new_feature  # Verify it's there
 
 ---
 
-**Last Updated:** 2025-12-08
+**Last Updated:** 2025-12-24
 **Maintainer:** Clausi Development Team
 **CLI Version:** 1.0.0

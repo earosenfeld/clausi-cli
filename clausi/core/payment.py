@@ -237,9 +237,25 @@ def make_async_scan_request(api_url: str, openai_key: str, provider: str, data: 
             elif provider == "openai":
                 headers["X-OpenAI-Key"] = openai_key
 
-        # Add token if available
+        # Check for token - require login if not found
         token = get_api_token()
-        if token:
+        if not token:
+            console.print(f"\n{emoji('warning')} No account found. Starting login...\n")
+
+            # Auto-start the login flow
+            import subprocess
+            result = subprocess.run(["clausi", "login"], shell=True)
+
+            # Check if login succeeded
+            token = get_api_token()
+            if token:
+                console.print(f"\n{emoji('checkmark')} Login successful! Continuing with scan...\n")
+                headers["X-Clausi-Token"] = token
+            else:
+                console.print(f"\n{emoji('crossmark')} Login was not completed.")
+                console.print(f"{emoji('info')} Run 'clausi login' to try again.\n")
+                return None
+        else:
             headers["X-Clausi-Token"] = token
 
         console.print(f"{emoji('search')} Starting async scan...")
@@ -252,28 +268,13 @@ def make_async_scan_request(api_url: str, openai_key: str, provider: str, data: 
             timeout=30  # Short timeout for starting job
         )
 
-        # Handle 401 (trial token created) and 402 (payment required) before raise_for_status
+        # Handle 401 (unauthorized) and 402 (payment required) before raise_for_status
         if response.status_code == 401:
-            # Trial token created - save and retry
-            response_data = response.json()
-            api_token = response_data.get("api_token")
-            credits = response_data.get("credits", 0)
-            trial_balance = credits * 0.10
-
-            console.print(f"{emoji('party')} Trial account created!")
-            console.print(f"   Free balance: ${trial_balance:.2f}")
-            console.print("\n   Saving credentials and retrying scan...")
-
-            save_api_token(api_token)
-
-            # Retry with new token
-            headers["X-Clausi-Token"] = api_token
-            response = requests.post(
-                f"{api_url}/api/clausi/scan/async",
-                json=data,
-                headers=headers,
-                timeout=30
-            )
+            # Token invalid or expired - prompt to login again
+            console.print(f"\n{emoji('warning')} Your session has expired or token is invalid.\n")
+            console.print("Please login again:")
+            console.print(f"   clausi login")
+            return None
 
         if response.status_code == 402:
             # Payment required - open browser
