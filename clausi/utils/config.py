@@ -170,10 +170,6 @@ def get_ai_model(provider: str = None) -> str:
     else:  # openai
         return "gpt-4"
 
-def show_token_status():
-    """Deprecated: Use show_balance_status() instead."""
-    show_balance_status()
-
 def show_balance_status():
     """Show account balance status."""
     token = get_api_token()

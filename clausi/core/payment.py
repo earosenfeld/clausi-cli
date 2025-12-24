@@ -43,18 +43,13 @@ def check_payment_required(api_url: str, mode: str = "full") -> bool:
                     except Exception as e:
                         console.print(f"[red]Could not open browser: {e}[/red]")
 
-                    console.print(f"\n{emoji('clipboard')} PAYMENT INSTRUCTIONS:")
-                    console.print(f"   {emoji('credit_card')} Use test card: 4242 4242 4242 4242")
-                    console.print("   Any future date")
-                    console.print("   Any 3-digit CVC")
-                    console.print("   Any email address")
-                    console.print("\n   Complete your payment in the browser")
+                    console.print(f"\n{emoji('clipboard')} Complete your payment in the browser")
                     console.print("   After payment, run your scan command again")
 
                     # Wait a moment for browser to open
                     time.sleep(2)
 
-                    console.print(f"\n🔗 Payment URL also available at:")
+                    console.print(f"\n{emoji('link')} Payment URL also available at:")
                     console.print(f"   {checkout_url}")
                     console.print("\n" + "=" * 60)
 

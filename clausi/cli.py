@@ -26,7 +26,6 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.panel import Panel
 from rich.markdown import Markdown
-from rich import print as rprint
 from dotenv import load_dotenv
 try:
     import pathspec
@@ -149,9 +148,7 @@ def get_clausi_api_key():
     
     return None
 
-def get_openai_key() -> Optional[str]:
-    """Get OpenAI API key from config file."""
-    return config_module.get_openai_key()
+# Use config_module.get_openai_key() directly instead of wrapper
 
 def validate_openai_key(key: str) -> bool:
     """Validate the OpenAI API key by making a test request."""
@@ -218,7 +215,7 @@ def _validate_and_get_api_key(provider: str, model: Optional[str] = None):
 
     # OpenAI provider - requires OpenAI API key
     elif provider == "openai":
-        api_key = get_openai_key()
+        api_key = config_module.get_openai_key()
         if not api_key:
             console.print("\n[bold yellow]OpenAI API Key Required[/bold yellow]")
             console.print("\nTo use OpenAI, you need to set up your OpenAI API key:")

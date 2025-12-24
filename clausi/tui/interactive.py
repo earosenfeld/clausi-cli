@@ -10,6 +10,42 @@ from questionary import Style
 
 console = Console()
 
+
+def open_native_file_dialog() -> str | None:
+    """Open native OS file explorer dialog to select a folder.
+
+    Works on Windows, macOS, and Linux.
+    Returns the selected path or None if cancelled.
+    """
+    try:
+        # Import tkinter (comes with Python)
+        import tkinter as tk
+        from tkinter import filedialog
+
+        # Create a hidden root window
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        root.attributes('-topmost', True)  # Bring dialog to front
+
+        # Open folder selection dialog
+        folder_path = filedialog.askdirectory(
+            title="Select Project Folder",
+            initialdir=os.getcwd()
+        )
+
+        root.destroy()
+
+        return folder_path if folder_path else None
+
+    except ImportError:
+        console.print("[yellow]Native file dialog not available (tkinter not installed)[/yellow]")
+        console.print("[dim]Falling back to terminal browser...[/dim]")
+        return None
+    except Exception as e:
+        console.print(f"[yellow]Could not open file dialog: {e}[/yellow]")
+        console.print("[dim]Falling back to terminal browser...[/dim]")
+        return None
+
 # Custom style for questionary prompts
 custom_style = Style([
     ('qmark', 'fg:cyan bold'),
@@ -134,8 +170,9 @@ class ClausInteractiveTUI:
         """
         choices = [
             "1. Current directory (.)",
-            "2. Browse for folder...",
-            "3. Type path manually"
+            "2. Open file explorer...",
+            "3. Browse in terminal...",
+            "4. Type path manually"
         ]
 
         choice = questionary.select(
@@ -153,7 +190,15 @@ class ClausInteractiveTUI:
 
         if choice == "Current directory (.)":
             return "."
-        elif choice == "Browse for folder...":
+        elif choice == "Open file explorer...":
+            # Try native file dialog first
+            path = open_native_file_dialog()
+            if path:
+                return path
+            # Fall back to terminal browser if native dialog fails
+            console.print("[dim]Opening terminal browser instead...[/dim]")
+            return self.browse_directory()
+        elif choice == "Browse in terminal...":
             return self.browse_directory()
         else:
             # Manual path entry with autocomplete
