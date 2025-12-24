@@ -631,7 +631,6 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
         model = openai_model if openai_model != "" else config_module.get_ai_model("openai")
     else:
         # Default: use Clausi hosted AI (pay per scan, $2 minimum)
-        # $2.00 free trial on first scan, then pay as you go
         provider = "clausi"
         model = None
 

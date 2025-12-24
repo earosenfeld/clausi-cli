@@ -7,8 +7,34 @@ from rich.console import Console
 from rich.prompt import Prompt
 import questionary
 from questionary import Style
+import yaml
+
+# Import regulations utilities
+from clausi.utils import regulations as regs_module
 
 console = Console()
+
+# Template for new custom regulations
+CUSTOM_REGULATION_TEMPLATE = '''name: "{name}"
+description: "{description}"
+version: "1.0"
+
+clauses:
+  - id: "{code}-001"
+    title: "Example Requirement"
+    description: "Description of this compliance requirement"
+    requirements:
+      - "First specific requirement to check"
+      - "Second specific requirement to check"
+    severity: "high"
+
+  - id: "{code}-002"
+    title: "Another Requirement"
+    description: "Description of another compliance requirement"
+    requirements:
+      - "Requirement details here"
+    severity: "warning"
+'''
 
 
 def open_native_file_dialog() -> str | None:
@@ -209,6 +235,185 @@ class ClausInteractiveTUI:
             ).ask()
             return path
 
+    def create_custom_regulation(self, project_path: str = None) -> str | None:
+        """Create a new custom regulation from template.
+
+        Returns the regulation code if created, None otherwise.
+        """
+        console.print("\n[bold cyan]Create Custom Regulation[/bold cyan]\n")
+
+        # Get regulation details
+        reg_name = questionary.text(
+            "Regulation name (e.g., 'Company Security Policy'):",
+            style=custom_style
+        ).ask()
+
+        if not reg_name:
+            console.print("[yellow]Cancelled[/yellow]")
+            return None
+
+        reg_description = questionary.text(
+            "Brief description:",
+            default=f"Custom compliance requirements for {reg_name}",
+            style=custom_style
+        ).ask()
+
+        if reg_description is None:
+            console.print("[yellow]Cancelled[/yellow]")
+            return None
+
+        # Generate code from name (e.g., "Company Security Policy" -> "COMPANY-SECURITY-POLICY")
+        reg_code = reg_name.upper().replace(" ", "-").replace("_", "-")
+        reg_code = ''.join(c for c in reg_code if c.isalnum() or c == '-')
+
+        # Ask where to save
+        save_choices = [
+            "1. Global (~/.clausi/custom_regulations/)",
+            "2. Project-specific (.clausi/regulations/)"
+        ]
+
+        if project_path:
+            save_choice = questionary.select(
+                "Where to save?",
+                choices=save_choices,
+                qmark="",
+                pointer="→"
+            ).ask()
+        else:
+            save_choice = save_choices[0]  # Default to global if no project
+
+        if save_choice is None:
+            console.print("[yellow]Cancelled[/yellow]")
+            return None
+
+        # Determine save path
+        if "Global" in save_choice:
+            save_dir = Path.home() / ".clausi" / "custom_regulations"
+        else:
+            save_dir = Path(project_path) / ".clausi" / "regulations"
+
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create filename from code
+        filename = reg_code.lower() + ".yml"
+        file_path = save_dir / filename
+
+        # Check if already exists
+        if file_path.exists():
+            overwrite = questionary.confirm(
+                f"File {filename} already exists. Overwrite?",
+                default=False
+            ).ask()
+            if not overwrite:
+                console.print("[yellow]Cancelled[/yellow]")
+                return None
+
+        # Generate content from template
+        content = CUSTOM_REGULATION_TEMPLATE.format(
+            name=reg_name,
+            description=reg_description,
+            code=reg_code
+        )
+
+        # Write file
+        try:
+            with open(file_path, 'w') as f:
+                f.write(content)
+            console.print(f"\n[green]✓[/green] Created: {file_path}")
+            console.print(f"[dim]Edit this file to add your compliance requirements.[/dim]")
+
+            # Ask if they want to open the file
+            open_file = questionary.confirm(
+                "Open file in default editor?",
+                default=True
+            ).ask()
+
+            if open_file:
+                if sys.platform == 'win32':
+                    os.startfile(str(file_path))
+                elif sys.platform == 'darwin':
+                    os.system(f'open "{file_path}"')
+                else:
+                    os.system(f'xdg-open "{file_path}"')
+
+            return reg_code
+
+        except Exception as e:
+            console.print(f"[red]Error creating file: {e}[/red]")
+            return None
+
+    def select_regulations(self, project_path: str = None) -> list[str] | None:
+        """Interactive regulation selection with checkboxes.
+
+        Shows built-in regulations and any discovered custom regulations.
+        Returns list of selected regulation codes, or None if cancelled.
+        """
+        # Fetch built-in and discover custom regulations
+        built_in_regs = regs_module.get_regulations()
+        custom_regs = regs_module.discover_custom_regulations(
+            project_path=Path(project_path) if project_path else None
+        )
+
+        # Build choices list
+        choices = []
+
+        # Add built-in regulations
+        for code, info in built_in_regs.items():
+            name = info.get('name', code)
+            desc = info.get('description', '')
+            # Pre-select EU-AIA by default
+            checked = code == "EU-AIA"
+            choices.append(questionary.Choice(
+                title=f"{code} - {name}",
+                value=code,
+                checked=checked
+            ))
+
+        # Add separator if there are custom regulations
+        if custom_regs:
+            choices.append(questionary.Separator("── Custom Regulations ──"))
+            for code, path in custom_regs.items():
+                # Load to get the name
+                reg_data = regs_module.load_custom_regulation(path)
+                name = reg_data.get('name', code) if reg_data else code
+                choices.append(questionary.Choice(
+                    title=f"{code} - {name} [custom]",
+                    value=code,
+                    checked=False
+                ))
+
+        # Add option to create new custom regulation
+        choices.append(questionary.Separator("──────────────────────"))
+        choices.append(questionary.Choice(
+            title="➕ Create new custom regulation...",
+            value="__CREATE_NEW__"
+        ))
+
+        # Show checkbox selection
+        selected = questionary.checkbox(
+            "Select regulations to check (use SPACE to select, ENTER to confirm):",
+            choices=choices,
+            qmark="",
+            style=custom_style
+        ).ask()
+
+        if selected is None:
+            return None
+
+        # Handle "create new" option
+        if "__CREATE_NEW__" in selected:
+            selected.remove("__CREATE_NEW__")
+            new_reg_code = self.create_custom_regulation(project_path)
+            if new_reg_code:
+                selected.append(new_reg_code)
+
+        # Validate at least one regulation selected
+        if not selected:
+            console.print("[yellow]No regulations selected. Using EU-AIA as default.[/yellow]")
+            return ["EU-AIA"]
+
+        return selected
+
     def scan_wizard(self):
         """Interactive scan wizard with numbered steps."""
         console.print("\n[bold cyan]Scan Wizard[/bold cyan]\n")
@@ -255,38 +460,16 @@ class ClausInteractiveTUI:
         }
         provider_flag = provider_flags[provider_choice]
 
-        # Step 3: Regulations
+        # Step 3: Regulations - now with proper checkbox selection
         console.print()
-        reg_choices = [
-            "1. EU AI Act only",
-            "2. EU AI Act + GDPR",
-            "3. All regulations (EU-AIA, GDPR, ISO-42001, HIPAA, SOC2)",
-            "4. Custom selection"
-        ]
-        reg_choice = questionary.select(
-            "Select regulations:",
-            choices=reg_choices,
-            qmark="",
-            pointer="→"
-        ).ask()
+        selected_regs = self.select_regulations(project_path=path)
 
-        # Handle user cancellation
-        if reg_choice is None:
+        if selected_regs is None:
             console.print("\n[yellow]Scan cancelled[/yellow]\n")
             return
 
-        # Strip number prefix
-        reg_choice = reg_choice.split(". ", 1)[1]
-
-        if reg_choice == "EU AI Act only":
-            reg_flags = "-r EU-AIA"
-        elif reg_choice == "EU AI Act + GDPR":
-            reg_flags = "-r EU-AIA -r GDPR"
-        elif reg_choice == "All regulations (EU-AIA, GDPR, ISO-42001, HIPAA, SOC2)":
-            reg_flags = "-r EU-AIA -r GDPR -r ISO-42001 -r HIPAA -r SOC2"
-        else:
-            regs = Prompt.ask("Enter regulations (comma-separated)", default="EU-AIA")
-            reg_flags = " ".join([f"-r {r.strip()}" for r in regs.split(",")])
+        # Build regulation flags
+        reg_flags = " ".join([f"-r {r}" for r in selected_regs])
 
         # Step 4: Additional options
         console.print()

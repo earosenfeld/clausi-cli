@@ -75,7 +75,7 @@
 
 | Mode | CLI Flag | API Key Required | Backend Behavior | Cost |
 |------|----------|------------------|------------------|------|
-| Clausi AI (default) | None | ❌ No | Uses backend's AI | $2 min via credits |
+| Clausi AI (default) | None | ❌ No | Uses backend's AI | $2.00 min via credits |
 | Claude (BYOK) | `--claude [MODEL]` | ✅ Yes (Anthropic) | Uses customer's key | $0.50 platform fee |
 | OpenAI (BYOK) | `--openai [MODEL]` | ✅ Yes (OpenAI) | Uses customer's key | $0.50 platform fee |
 

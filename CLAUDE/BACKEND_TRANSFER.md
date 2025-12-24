@@ -112,12 +112,12 @@ def get_ai_provider(api_key: Optional[str] = None, provider_name: str = "claude"
 3. ✅ Check customer credits before scan
 4. ✅ Deduct credits after scan
 5. ✅ Return 402 Payment Required if insufficient credits
-6. ✅ Support trial account creation (20 free tokens)
+6. ✅ Support account creation (20 starting credits)
 
 **Pricing:**
-- Minimum: 25 tokens ($2.50)
-- Plus: 10 tokens per 100k tokens ($1.00 per 100k)
-- Free trial: 20 tokens ($2.00 value) for new users
+- Minimum: 20 credits ($2.00)
+- Plus: 8 credits per 100k tokens ($0.80 per 100k)
+- New users: 20 credits ($2.00 starting balance)
 
 ---
 

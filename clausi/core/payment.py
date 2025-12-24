@@ -77,8 +77,8 @@ def handle_scan_response(response: requests.Response, api_url: str, openai_key: 
         # Convert credits to dollars for user-facing display (hybrid approach: 1 credit = $0.10)
         trial_balance = credits * 0.10
 
-        console.print(f"{emoji('party')} Trial account created!")
-        console.print(f"   Free balance: ${trial_balance:.2f}")
+        console.print(f"{emoji('party')} Account created!")
+        console.print(f"   Starting balance: ${trial_balance:.2f}")
         console.print("\n   Saving credentials and starting scan...")
 
         # Save token to config file

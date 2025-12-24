@@ -92,7 +92,7 @@ clausi --version  # Should show: 1.0.0
 clausi
 
 # Or use direct commands
-clausi scan .  # Uses free Clausi AI (no API key required)
+clausi scan .  # Uses Clausi AI (no API key required)
 
 # With features
 clausi scan . --preset critical-only --open-findings
@@ -128,7 +128,7 @@ clausi scan . --openai gpt-4o
 
 2. **Flexible AI Provider Options**
    ```bash
-   clausi scan .               # Uses Clausi AI (free, no API key required)
+   clausi scan .               # Uses Clausi AI (no API key required)
    clausi scan . --claude      # Uses Claude with your Anthropic API key
    clausi scan . --openai gpt-4o  # Uses OpenAI with your API key
    clausi models list          # View all available models

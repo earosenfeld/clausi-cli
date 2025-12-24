@@ -180,4 +180,4 @@ def show_balance_status():
         console.print("\nView your full balance at: https://www.clausi.ai/dashboard")
     else:
         console.print("[yellow]No account found[/yellow]")
-        console.print("Run a scan to create a free trial account ($2.00 credit included).") 
+        console.print("Run 'clausi login' to create an account.") 
