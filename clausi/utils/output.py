@@ -255,12 +255,7 @@ def display_cache_statistics(cache_stats: dict) -> None:
     total_files = cache_stats.get("total_files", 0)
     table.add_row("Files Cached", f"{cache_hits} / {total_files}")
 
-    # Tokens saved
-    tokens_saved = cache_stats.get("tokens_saved", 0)
-    if tokens_saved > 0:
-        table.add_row("Tokens Saved", f"{tokens_saved:,}")
-
-    # Cost saved
+    # Cost saved ($ only - hybrid approach, tokens kept internal)
     cost_saved = cache_stats.get("cost_saved", 0)
     if cost_saved > 0:
         table.add_row("Cost Saved", f"${cost_saved:.2f}")
@@ -300,8 +295,8 @@ def display_scan_progress(
     status_text = f"[cyan]File {current_file}/{total_files}:[/cyan] {file_name}\n"
     status_text += f"[yellow]Clause {current_clause}/{total_clauses}:[/yellow] {clause_id}"
 
-    if tokens_used > 0:
-        status_text += f"\n[dim]Tokens: {tokens_used:,} | Cost: ${estimated_cost:.2f}[/dim]"
+    if estimated_cost > 0:
+        status_text += f"\n[dim]Cost: ${estimated_cost:.2f}[/dim]"
 
     console.print(status_text)
 

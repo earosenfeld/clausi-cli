@@ -38,8 +38,31 @@ Supported regulatory frameworks (built-in):
 | HIPAA | Health Insurance Portability and Accountability Act |
 | SOC2 | SOC 2 – System and Organization Controls Type 2 |
 
-Additional frameworks can be added on the server side without requiring a
-client update.
+### Custom Regulations
+
+You can create your own regulations with custom clauses! Place YAML files in `~/.clausi/custom_regulations/` or `.clausi/regulations/` (project-specific).
+
+**Example** (`~/.clausi/custom_regulations/company-security.yml`):
+```yaml
+name: "Company Security Policy"
+description: "Internal security requirements"
+version: "1.0"
+
+clauses:
+  - id: "SEC-001"
+    title: "Authentication Requirements"
+    requirements:
+      - "Implement multi-factor authentication"
+      - "Support TOTP or hardware security keys"
+    severity: "critical"
+```
+
+Then use it:
+```bash
+clausi scan . -r COMPANY-SECURITY
+```
+
+See full guide: `python -c "from clausi.utils import custom_regulations_README; print(custom_regulations_README.__file__)"`
 
 ---
 
@@ -62,30 +85,33 @@ pip install clausi
 clausi --version  # Should show: 1.0.0
 ```
 
-### **2. Get API Key**
+### **2. Run Your First Scan**
 
-Choose your AI provider:
-
-**Option A: Claude (Recommended)**
 ```bash
-# Get key from: https://console.anthropic.com
+# Interactive mode (recommended for first-time users)
+clausi
+
+# Or use direct commands
+clausi scan .  # Uses free Clausi AI (no API key required)
+
+# With features
+clausi scan . --preset critical-only --open-findings
+```
+
+### **3. Optional: Use Your Own AI Provider**
+
+If you prefer to use your own API keys:
+
+**Option A: Claude (Anthropic)**
+```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
+clausi scan . --claude
 ```
 
 **Option B: OpenAI**
 ```bash
-# Get key from: https://platform.openai.com/api-keys
 export OPENAI_API_KEY=sk-your-key-here
-```
-
-### **3. Run Your First Scan**
-
-```bash
-# Basic scan
-clausi scan .
-
-# With features
-clausi scan . --preset critical-only --open-findings
+clausi scan . --openai gpt-4o
 ```
 
 
@@ -95,25 +121,32 @@ clausi scan . --preset critical-only --open-findings
 
 ### **🚀 Major Features**
 
-1. **Multi-Model Support** - Choose Claude (Anthropic) or OpenAI
+1. **Interactive Mode** - Run `clausi` with no arguments for guided workflows
    ```bash
-   clausi scan . --ai-provider claude  # Faster, cheaper, better
-   clausi models list                  # View all models
+   clausi  # Launches interactive menu with arrow key navigation
    ```
 
-2. **Clause Scoping** - Reduce scan time and cost by 60-80%
+2. **Flexible AI Provider Options**
+   ```bash
+   clausi scan .               # Uses Clausi AI (free, no API key required)
+   clausi scan . --claude      # Uses Claude with your Anthropic API key
+   clausi scan . --openai gpt-4o  # Uses OpenAI with your API key
+   clausi models list          # View all available models
+   ```
+
+3. **Clause Scoping** - Reduce scan time and cost by 60-80%
    ```bash
    clausi scan . --preset critical-only  # Only critical clauses
    clausi scan . --include EUAIA-3.1     # Specific clauses
    ```
 
-3. **Markdown-First Output** - Auto-open findings in your editor
+4. **Markdown-First Output** - Auto-open findings in your editor
    ```bash
    clausi scan . --open-findings      # Auto-opens findings.md
    clausi scan . --show-markdown      # Terminal preview
    ```
 
-4. **Cache Statistics** - See cost savings from caching
+5. **Cache Statistics** - See cost savings from caching
    ```bash
    clausi scan . --show-cache-stats
    # Output: Cache Hit Rate: 80%, Cost Saved: $2.25

@@ -77,12 +77,14 @@ def handle_scan_response(response: requests.Response, api_url: str, openai_key: 
         # Trial token created - save and retry
         response_data = response.json()
         api_token = response_data.get("api_token")
-        credits = response_data.get("credits")
+        credits = response_data.get("credits", 0)
+
+        # Convert credits to dollars for user-facing display (hybrid approach: 1 credit = $0.10)
+        trial_balance = credits * 0.10
 
         console.print(f"{emoji('party')} Trial account created!")
-        console.print(f"   Credits: {credits}")
-        console.print(f"   Token: {api_token[:8]}...")
-        console.print("\n   Saving token and retrying scan...")
+        console.print(f"   Free balance: ${trial_balance:.2f}")
+        console.print("\n   Saving credentials and starting scan...")
 
         # Save token to config file
         save_api_token(api_token)
@@ -144,43 +146,44 @@ def handle_scan_response(response: requests.Response, api_url: str, openai_key: 
         sys.exit(1)
 
 def handle_payment_required(response: requests.Response):
-    """Handle 402 Payment Required response."""
+    """Handle 402 Payment Required response - redirect to dashboard."""
     try:
         payment_data = response.json()
         checkout_url = payment_data.get("checkout_url")
-        
+        credits_remaining = payment_data.get("credits_remaining", 0)
+
         if not checkout_url:
             console.print(f"{emoji('crossmark')} No payment URL found in response")
             return
 
+        # Convert tokens to dollars for user-facing display (hybrid approach)
+        balance_dollars = credits_remaining * 0.10
+
         console.print("\n" + "=" * 60)
-        console.print(f"{emoji('credit_card')} PAYMENT REQUIRED")
+        console.print(f"{emoji('warning')} INSUFFICIENT BALANCE")
         console.print("=" * 60)
 
-        console.print(f"\n{emoji('info')} Opening payment page in your browser...")
-        console.print(f"   URL: {checkout_url}")
+        console.print(f"\n{emoji('info')} Balance remaining: ${balance_dollars:.2f}")
+        console.print("\nOpening your dashboard to add funds...")
 
         # Open browser automatically
         try:
             webbrowser.open(checkout_url)
+            console.print(f"{emoji('checkmark')} Dashboard opened in your browser")
         except Exception as e:
             console.print(f"[red]Could not open browser: {e}[/red]")
+            console.print(f"\nPlease visit: {checkout_url}")
 
-        console.print(f"\n{emoji('clipboard')} PAYMENT INSTRUCTIONS:")
-        console.print(f"   {emoji('credit_card')} Use test card: 4242 4242 4242 4242")
-        console.print("   Any future date")
-        console.print("   Any 3-digit CVC")
-        console.print("   Any email address")
-        console.print("\n   Complete your payment in the browser")
-        console.print("   After payment, run your scan command again")
-        
-        # Wait a moment for browser to open
-        time.sleep(2)
-        
-        console.print(f"\n🔗 Payment URL also available at:")
+        console.print(f"\n{emoji('clipboard')} NEXT STEPS:")
+        console.print("   1. Complete your purchase in the browser")
+        console.print("   2. Return here and re-run your scan command")
+        console.print("\n   Example:")
+        console.print("   $ clausi scan .")
+
+        console.print(f"\n{emoji('link')} Dashboard URL:")
         console.print(f"   {checkout_url}")
         console.print("\n" + "=" * 60)
-        
+
         # Exit gracefully
         sys.exit(0)
 
@@ -253,6 +256,35 @@ def make_async_scan_request(api_url: str, openai_key: str, provider: str, data: 
             headers=headers,
             timeout=30  # Short timeout for starting job
         )
+
+        # Handle 401 (trial token created) and 402 (payment required) before raise_for_status
+        if response.status_code == 401:
+            # Trial token created - save and retry
+            response_data = response.json()
+            api_token = response_data.get("api_token")
+            credits = response_data.get("credits", 0)
+            trial_balance = credits * 0.10
+
+            console.print(f"{emoji('party')} Trial account created!")
+            console.print(f"   Free balance: ${trial_balance:.2f}")
+            console.print("\n   Saving credentials and retrying scan...")
+
+            save_api_token(api_token)
+
+            # Retry with new token
+            headers["X-Clausi-Token"] = api_token
+            response = requests.post(
+                f"{api_url}/api/clausi/scan/async",
+                json=data,
+                headers=headers,
+                timeout=30
+            )
+
+        if response.status_code == 402:
+            # Payment required - open browser
+            handle_payment_required(response)
+            return None
+
         response.raise_for_status()
         job_data = response.json()
         job_id = job_data.get("job_id")

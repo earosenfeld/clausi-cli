@@ -478,7 +478,7 @@ def show():
     api = config.get("api", {})
 
     # Show API URL with tunnel indicator
-    current_api_url = config_module.get_api_url()
+    current_api_url = get_api_url()
     tunnel_base = os.getenv('CLAUSI_TUNNEL_BASE')
     if tunnel_base:
         api_url_display = f"{current_api_url} (via CLAUSI_TUNNEL_BASE)"
@@ -633,9 +633,10 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
         # If --openai has a value, it's the model; otherwise use default
         model = openai_model if openai_model != "" else config_module.get_ai_model("openai")
     else:
-        # Default: use Clausi hosted AI (no API key required)
+        # Default: use Clausi hosted AI (pay per scan, $2 minimum)
+        # $2.00 free trial on first scan, then pay as you go
         provider = "clausi"
-        model = None  # Not needed for Clausi hosted AI
+        model = None
 
     # Validate and get API key
     api_key = _validate_and_get_api_key(provider, model)
@@ -728,30 +729,25 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
             sys.exit(1)
         
         estimate = response.json()
-        
-        # Display token estimates
-        console.print("\n[bold]Estimated Token Usage:[/bold]")
-        console.print(f"Total Tokens: {estimate['total_tokens']:,}")
-        console.print(f"- Prompt Tokens: {estimate['prompt_tokens']:,}")
-        console.print(f"- Completion Tokens: {estimate['completion_tokens']:,}")
+
+        # Display cost estimate ($ only - hybrid approach)
+        console.print("\n[bold]Scan Estimate:[/bold]")
         console.print(f"Estimated Cost: ${estimate['estimated_cost']:.2f}")
-        
+
         # Show per-regulation breakdown
-        console.print("\n[bold]Per Regulation Breakdown:[/bold]")
+        console.print("\n[bold]Per Regulation:[/bold]")
         for reg in estimate['regulation_breakdown']:
-            console.print(f"\n{REGULATIONS[reg['regulation']]['name']}:")
-            console.print(f"- Total Tokens: {reg['total_tokens']:,}")
-            console.print(f"- Estimated Cost: ${reg['estimated_cost']:.2f}")
-        
-        # Show per-file breakdown if requested
+            console.print(f"  {REGULATIONS[reg['regulation']]['name']}: ${reg['estimated_cost']:.2f}")
+
+        # Show per-file breakdown if requested (--show-details)
         if show_details:
-            console.print("\n[bold]Per File Breakdown:[/bold]")
+            console.print("\n[bold]Per File:[/bold]")
             for file in estimate['file_breakdown']:
-                console.print(f"\n{file['path']}:")
-                console.print(f"- Tokens: {file['tokens']:,}")
-                console.print(f"- Estimated Cost: ${file['estimated_cost']:.2f}")
+                cost_str = f"${file['estimated_cost']:.2f}"
                 if file.get('too_large', False):
-                    console.print(f"[red]- File is too large to analyze[/red]")
+                    console.print(f"  {file['path']}: [red]Too large[/red]")
+                else:
+                    console.print(f"  {file['path']}: {cost_str}")
         
         # Check against max cost if specified
         if max_cost is not None and estimate['estimated_cost'] > max_cost:
@@ -772,6 +768,8 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
         
         # Proceed with full analysis
         data['estimate_only'] = False  # Remove the estimation flag
+        # Include estimated credits for backend credit check
+        data['estimated_credits'] = estimate.get('clausi_tokens', 2)
 
         try:
             # Use async scan request (with job polling) to prevent timeouts on large scans
@@ -856,12 +854,10 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
 
                 console.print(table)
 
-            # Display actual token usage
+            # Display actual cost ($ only - hybrid approach)
             if "token_usage" in result:
                 token_usage = result["token_usage"]
-                console.print("\n[bold]Actual Token Usage:[/bold]")
-                console.print(f"Total tokens used: {token_usage.get('total_tokens', 0):,}")
-                console.print(f"Actual cost: ${token_usage.get('cost', 0):.2f}")
+                console.print(f"\n[bold]Actual Cost:[/bold] ${token_usage.get('cost', 0):.2f}")
 
             # Display cache statistics if available and enabled
             cfg = load_config()
@@ -942,9 +938,9 @@ def scan(path: str, regulation: Optional[List[str]], mode: str, output: Optional
         sys.exit(1)
 
 @cli.command()
-def tokens():
-    """Show token status and remaining credits for full-mode scans."""
-    config_module.show_token_status()
+def balance():
+    """Show your account balance and status."""
+    config_module.show_balance_status()
 
 @cli.command()
 def setup():

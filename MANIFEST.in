@@ -12,6 +12,7 @@ recursive-include clausi *.py
 recursive-include clausi *.yml
 recursive-include clausi *.yaml
 recursive-include clausi *.css
+recursive-include clausi *.md
 
 # Exclude development and internal files
 exclude dev_test.py

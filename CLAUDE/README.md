@@ -1,227 +1,153 @@
-# Clausi CLI Documentation
+# Clausi CLI - AI Developer Documentation
 
-This directory contains documentation for the Clausi CLI modernization and backend integration.
-
----
-
-## 📚 **Active Documentation** (v1.0.0)
-
-### For Claude Developers
-
-**[CLAUDE.md](CLAUDE.md)** (Development Guide for Claude Instances)
-- 🎯 Core development philosophy (keep it simple!)
-- 📁 Repository structure and folder organization
-- 📝 Naming conventions (files, classes, functions)
-- 🏗️ Architecture patterns and layer separation
-- 🚫 What NOT to do (avoid common mistakes)
-- 🔧 Common patterns used in this repo
-- **Use this** when developing features or fixing bugs
-
-### For End Users
-
-**[USER_GUIDE.md](USER_GUIDE.md)** (Complete User Guide)
-- 📖 Step-by-step installation and setup
-- 🔍 Your first scan walkthrough
-- 📋 Understanding compliance results
-- ⚡ Advanced features (clause scoping, multi-model)
-- 💼 Common workflows and use cases
-- 🐛 Troubleshooting and tips
-- **Use this** for learning how to use the CLI
-
-### For Developers & Testers
-
-**[TESTING.md](TESTING.md)** (Testing Guide)
-- 🧪 Automated test system setup
-- 🚀 Quick start commands
-- 🔄 Watch mode for rapid iteration
-- 📊 Test coverage details
-- **Use this** for running and writing tests
-
-**[TEST_RESULTS.md](TEST_RESULTS.md)** (Latest Test Results)
-- ✅ Current test status
-- 🐛 Known issues and fixes
-- 📝 Test output examples
-- **Use this** to see what's been validated
-
-### For Backend Developers
-
-**[BACKEND_README.md](BACKEND_README.md)** ⭐ **START HERE - Backend Team Hub**
-- 🎯 Quick navigation to all backend docs
-- 📚 Recommended reading order (Day 1, Day 2, Ongoing)
-- 🧪 5-minute quick start guide
-- 💡 Understanding the user journey
-- 🔍 Common questions answered
-- **Use this** as your central hub for all backend resources
-
-**[USER_GUIDE.md](USER_GUIDE.md)** (User Experience)
-- How customers actually use the CLI
-- Step-by-step installation and setup
-- Running scans, understanding results
-- All commands and workflows
-- **Use this** to understand the user experience
-
-**[BACKEND_CLI_TESTING_GUIDE.md](BACKEND_CLI_TESTING_GUIDE.md)** (Integration Testing)
-- How to install and run the CLI locally
-- Testing BYOK vs Credits payment modes
-- Sample curl commands for each endpoint
-- Expected headers and request/response formats
-- **Use this** to test CLI ↔ Backend integration
-
-**[BACKEND_INTEGRATION_GUIDE.md](BACKEND_INTEGRATION_GUIDE.md)** (API Contract)
-- Complete API specifications
-- Request/response schemas
-- Implementation examples
-- Migration guide
-- **Use this** for implementing backend changes
-
-**[CHANGELOG_v1.0.0.md](CHANGELOG_v1.0.0.md)** (Quick Reference)
-- Quick overview of what changed in v1.0.0
-- Feature summaries with examples
-- Comparison table (v0.3.0 vs v1.0.0)
-- Testing guide
-- **Use this** for a quick summary of changes
-
-### For CLI Development
-
-**[CLI_MODERNIZATION_PLAN.md](CLI_MODERNIZATION_PLAN.md)** (Roadmap)
-- Complete 12-week modernization plan
-- **Phase 1:** ✅ COMPLETE (v1.0.0 released)
-- **Phase 2:** Auto-Fix Experience (upcoming)
-- **Phase 3:** Developer Tools (upcoming)
-- Detailed task breakdown with code examples
-- **Use this** to understand the full vision and upcoming features
-
-**[TUI_IMPLEMENTATION.md](TUI_IMPLEMENTATION.md)** (Interactive Terminal UI)
-- Terminal User Interface (TUI) implementation details
-- Interactive configuration editor
-- Module structure and design decisions
-- Usage examples and keyboard shortcuts
-- **Use this** to understand the optional TUI mode
-
-**[CLAUSI_CLI_KNOWLEDGE_TRANSFER.md](CLAUSI_CLI_KNOWLEDGE_TRANSFER.md)** (Architecture)
-- Architecture overview and design decisions
-- Code structure and organization
-- Component interactions
-- **Note:** Updated for v1.0.0 (package rename, new structure)
-- **Use this** to understand how the CLI works internally
+> **Purpose:** Documentation hub for AI assistants working on Clausi CLI
+>
+> **Last Updated:** 2025-12-08
+> **CLI Version:** 1.0.0
 
 ---
 
-## 📦 **v1.0.0 Release Summary**
+## 📚 Documentation Files
 
-### New Features
+This directory contains **4 essential files** for AI-assisted development:
 
-1. **Multi-Model Support**
-   - Claude (Anthropic) as default provider
-   - OpenAI GPT-4 support
-   - `clausi models list` command
-   - `--ai-provider` and `--ai-model` flags
+### 1. **[CLAUDE.md](CLAUDE.md)** - Main Developer Guide ⭐ START HERE
 
-2. **Clause Scoping**
-   - Interactive clause selection
-   - Predefined presets (critical-only, high-priority, documentation)
-   - `--include`, `--exclude`, `--preset` flags
-   - 60-80% cost reduction potential
+**Comprehensive technical guide for AI developers (~1,950 lines)**
 
-3. **Markdown-First Output**
-   - Auto-generated `findings.md`, `traceability.md`, `action_plan.md`
-   - Auto-open in default editor (`--open-findings`)
-   - Terminal markdown display (`--show-markdown`)
-   - Rich formatting with tables and syntax highlighting
+**When to use:** Any time you're working on CLI development
 
-4. **Enhanced Progress & Cache Statistics**
-   - Detailed progress bars with time estimates
-   - Cache hit/miss tracking
-   - Cost savings transparency
-   - `--show-cache-stats` / `--no-cache-stats` flags
+**Contents:**
+- **Part 1: Understanding the System**
+  - What is Clausi CLI
+  - Architecture overview
+  - Directory structure
+  - Key concepts (AI providers, interactive mode, custom regulations, payment flow)
 
-### Backend Integration Required
+- **Part 2: Key Components**
+  - `cli.py` - Main orchestration
+  - `payment.py` - Payment & API communication
+  - `interactive.py` - Interactive mode
+  - `scanner.py` - File discovery
+  - `config.py` - Configuration management
+  - `regulations.py` - Custom regulations
 
-See `BACKEND_INTEGRATION_GUIDE.md` for complete details.
+- **Part 3: Development Guide**
+  - Common tasks (add AI provider, add CLI command, modify interactive mode)
+  - Code patterns to follow
+  - Testing guide
+  - Packaging & distribution
 
-**New Request Fields (all optional):**
-- `ai_provider` - "claude" or "openai"
-- `ai_model` - Specific model name
-- `clauses_include` - Array of clause IDs to scan
-- `clauses_exclude` - Array of clause IDs to skip
+- **Part 4: Reference**
+  - Quick function reference (table with file:line numbers)
+  - Important patterns
+  - Gotchas & pitfalls
+  - Recent changes
 
-**New Response Fields:**
-- `run_id` - For markdown file downloads
-- `cache_stats` - Cache hit/miss statistics
-- `token_usage.provider` - AI provider used
-- `token_usage.model` - Model used
-
-**New Endpoint:**
-- `GET /api/clausi/report/{run_id}/{filename}` - Download markdown reports
+**Read this first for any development task.**
 
 ---
 
-## 📁 **Archive**
+### 2. **[PRICING_STRATEGY.md](PRICING_STRATEGY.md)** - Business Pricing
 
-The `archive/` folder contains outdated documentation:
+**Business model and monetization strategy (~600 lines)**
 
-- `BACKEND_API_EXAMPLES.md` - Code examples (now integrated into BACKEND_INTEGRATION_GUIDE.md)
-- `PAYMENT_INTEGRATION_SUMMARY.md` - Old payment flow docs (outdated file references)
+**When to use:** Working on pricing, payment flow, or business decisions
+
+**Contents:**
+- Three business models (Clausi AI, Claude BYOK, OpenAI BYOK)
+- Credit system and pricing tiers
+- Payment flow (trial system, Stripe integration)
+- Cost analysis (reveals current pricing is unsustainable!)
+- Future considerations (subscriptions, enterprise, freemium)
+- Recommendations and metrics to track
+
+**Important finding:** Current Clausi AI pricing loses money on most scans. See recommendations section for fixes.
 
 ---
 
-## 🚀 **Quick Start for Backend Developers**
+### 3. **[TESTING.md](TESTING.md)** - Testing Guide
 
-1. **Read:** `CHANGELOG_v1.0.0.md` (5 min)
-2. **Implement:** Follow `BACKEND_INTEGRATION_GUIDE.md` (2-4 hours)
-3. **Test:** Use CLI to verify integration
+**How to run and write tests**
 
-### Minimal Backend Changes
+**When to use:** Running tests or adding new tests
 
-All new fields are **optional** and **backward compatible**:
+**Contents:**
+- Test structure and organization
+- Running automated tests (`pytest`)
+- Manual testing checklist
+- Watch mode for rapid iteration
+- Test coverage details
 
-```python
-@app.post("/api/clausi/scan")
-def scan(request):
-    data = request.json
+---
 
-    # NEW: Get optional fields with defaults
-    ai_provider = data.get("ai_provider", "openai")
-    ai_model = data.get("ai_model", "gpt-4")
-    clauses_include = data.get("clauses_include", None)
-    clauses_exclude = data.get("clauses_exclude", None)
+### 4. **[README.md](README.md)** - This File
 
-    # Your existing logic continues to work!
-    result = perform_scan(data)
+**Navigation and index for CLAUDE/ folder**
 
-    # NEW: Add optional response fields
-    return {
-        "run_id": generate_run_id(),  # Optional
-        "findings": result["findings"],
-        "token_usage": {
-            "total_tokens": result["tokens"],
-            "cost": result["cost"],
-            "provider": ai_provider,  # NEW
-            "model": ai_model         # NEW
-        },
-        "cache_stats": {              # Optional
-            "total_files": 150,
-            "cache_hits": 120,
-            "cache_misses": 30,
-            "cache_hit_rate": 0.80,
-            "tokens_saved": 45000,
-            "cost_saved": 2.25
-        }
-    }
+---
+
+## 🚀 Quick Start for AI Developers
+
+**New to this project?**
+
+1. **Read CLAUDE.md** - Complete understanding of the system
+2. **Check PRICING_STRATEGY.md** - If working on payment/pricing
+3. **Use TESTING.md** - When running/writing tests
+
+**Common tasks:**
+
+| Task | File | Section |
+|------|------|---------|
+| Add new AI provider | CLAUDE.md | Part 3: Task 1 |
+| Add new CLI command | CLAUDE.md | Part 3: Task 2 |
+| Modify interactive mode | CLAUDE.md | Part 3: Task 3 |
+| Understand payment flow | CLAUDE.md | Part 2: payment.py |
+| Fix pricing issues | PRICING_STRATEGY.md | Cost Analysis |
+| Run tests | TESTING.md | Running Tests |
+
+---
+
+## 📋 File Summary
+
+```
+CLAUDE/
+├── CLAUDE.md              # Main developer guide (1,950 lines)
+├── PRICING_STRATEGY.md    # Business pricing (600 lines)
+├── TESTING.md             # Testing guide (150 lines)
+└── README.md              # This file
 ```
 
----
-
-## 📞 **Support**
-
-Questions? Check the documentation in this order:
-
-1. Quick questions → `CHANGELOG_v1.0.0.md`
-2. Backend integration → `BACKEND_INTEGRATION_GUIDE.md`
-3. Feature planning → `CLI_MODERNIZATION_PLAN.md`
-4. Architecture deep-dive → `CLAUSI_CLI_KNOWLEDGE_TRANSFER.md`
+**Total:** 4 files, ~2,700 lines of focused documentation
 
 ---
 
-**Last Updated:** 2025-10-18
-**CLI Version:** 1.0.0
+## 🎯 Philosophy
+
+**Keep it simple:**
+- ✅ ONE comprehensive file (CLAUDE.md) for technical development
+- ✅ ONE file for business/pricing (PRICING_STRATEGY.md)
+- ✅ ONE file for testing (TESTING.md)
+- ✅ No redundancy, no outdated docs
+
+**All AI developer docs in one place:**
+- No need to search through 15+ files
+- No confusion about which file to read
+- Always up-to-date and complete
+
+---
+
+## 📞 Support
+
+**Questions about:**
+- **Technical development** → CLAUDE.md
+- **Payment/pricing** → PRICING_STRATEGY.md
+- **Testing** → TESTING.md
+
+**Repository:** https://github.com/clausi/clausi-cli
+**Documentation:** https://docs.clausi.ai
+
+---
+
+**Last Updated:** 2025-12-08
+**Maintainer:** Clausi Development Team

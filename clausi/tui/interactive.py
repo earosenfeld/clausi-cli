@@ -6,8 +6,19 @@ from pathlib import Path
 from rich.console import Console
 from rich.prompt import Prompt
 import questionary
+from questionary import Style
 
 console = Console()
+
+# Custom style for questionary prompts
+custom_style = Style([
+    ('qmark', 'fg:cyan bold'),
+    ('question', 'bold'),
+    ('answer', 'fg:cyan'),
+    ('pointer', 'fg:cyan bold'),
+    ('highlighted', 'fg:cyan bold'),
+    ('selected', 'fg:cyan'),
+])
 
 
 class ClausInteractiveTUI:
@@ -66,22 +77,116 @@ class ClausInteractiveTUI:
         return result.split(". ", 1)[1] if result else None
 
 
+    def browse_directory(self, start_path: str = ".") -> str | None:
+        """Interactive directory browser similar to Claude Code.
+
+        Returns the selected path or None if cancelled.
+        """
+        current_path = Path(start_path).resolve()
+
+        while True:
+            # Build directory choices
+            choices = []
+
+            # Add parent directory option (unless at root)
+            if current_path.parent != current_path:
+                choices.append(".. (parent directory)")
+
+            # Add current directory selection option
+            choices.append(f"[Select this folder: {current_path.name or current_path}]")
+
+            # Add subdirectories
+            try:
+                subdirs = sorted([
+                    d.name + "/" for d in current_path.iterdir()
+                    if d.is_dir() and not d.name.startswith('.')
+                ])
+                choices.extend(subdirs)
+            except PermissionError:
+                console.print("[yellow]Permission denied for some directories[/yellow]")
+
+            # Show current location
+            console.print(f"\n[dim]Current: {current_path}[/dim]")
+
+            selection = questionary.select(
+                "Select a directory:",
+                choices=choices,
+                qmark="",
+                pointer="→",
+                style=custom_style
+            ).ask()
+
+            if selection is None:
+                return None
+
+            if selection == ".. (parent directory)":
+                current_path = current_path.parent
+            elif selection.startswith("[Select this folder:"):
+                return str(current_path)
+            else:
+                # Navigate into selected subdirectory (remove trailing /)
+                current_path = current_path / selection.rstrip("/")
+
+    def select_path(self) -> str | None:
+        """Let user choose how to specify the path to scan.
+
+        Returns the selected path or None if cancelled.
+        """
+        choices = [
+            "1. Current directory (.)",
+            "2. Browse for folder...",
+            "3. Type path manually"
+        ]
+
+        choice = questionary.select(
+            "Select project location:",
+            choices=choices,
+            qmark="",
+            pointer="→",
+            style=custom_style
+        ).ask()
+
+        if choice is None:
+            return None
+
+        choice = choice.split(". ", 1)[1]
+
+        if choice == "Current directory (.)":
+            return "."
+        elif choice == "Browse for folder...":
+            return self.browse_directory()
+        else:
+            # Manual path entry with autocomplete
+            path = questionary.path(
+                "Enter path to scan:",
+                only_directories=True,
+                style=custom_style
+            ).ask()
+            return path
+
     def scan_wizard(self):
         """Interactive scan wizard with numbered steps."""
         console.print("\n[bold cyan]Scan Wizard[/bold cyan]\n")
 
-        # Step 1: Directory
-        path = Prompt.ask("Path to scan", default=".")
+        # Step 1: Directory selection with browser
+        path = self.select_path()
+
+        if path is None:
+            console.print("\n[yellow]Scan cancelled[/yellow]\n")
+            return
+
         if not os.path.exists(path):
             console.print(f"[red]Error: Path '{path}' does not exist[/red]\n")
             return
 
+        console.print(f"[green]Selected:[/green] {Path(path).resolve()}")
+
         # Step 2: AI Provider
         console.print()
         provider_choices = [
-            "1. Clausi AI (free, no API key required)",
-            "2. Claude (requires Anthropic API key)",
-            "3. OpenAI (requires OpenAI API key)"
+            "1. Clausi AI (no API key needed, pay per scan)",
+            "2. Claude (bring your own Anthropic API key + $0.50 fee)",
+            "3. OpenAI (bring your own OpenAI API key + $0.50 fee)"
         ]
         provider_choice = questionary.select(
             "Select AI provider:",
@@ -99,9 +204,9 @@ class ClausInteractiveTUI:
         provider_choice = provider_choice.split(". ", 1)[1]
 
         provider_flags = {
-            "Clausi AI (free, no API key required)": "",
-            "Claude (requires Anthropic API key)": "--claude",
-            "OpenAI (requires OpenAI API key)": "--openai gpt-4o"
+            "Clausi AI (no API key needed, pay per scan)": "",
+            "Claude (bring your own Anthropic API key + $0.50 fee)": "--claude",
+            "OpenAI (bring your own OpenAI API key + $0.50 fee)": "--openai gpt-4o"
         }
         provider_flag = provider_flags[provider_choice]
 

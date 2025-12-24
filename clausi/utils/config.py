@@ -171,12 +171,17 @@ def get_ai_model(provider: str = None) -> str:
         return "gpt-4"
 
 def show_token_status():
-    """Show token status and remaining credits."""
+    """Deprecated: Use show_balance_status() instead."""
+    show_balance_status()
+
+def show_balance_status():
+    """Show account balance status."""
     token = get_api_token()
     if token:
-        console.print(f"[green]✓[/green] API token found: {token[:8]}...")
-        # TODO: Add API call to get remaining credits
-        console.print("[yellow]Note: Credit status not yet implemented[/yellow]")
+        console.print(f"[green]✓[/green] Account connected: {token[:8]}...")
+        # TODO: Add API call to get remaining balance
+        console.print("[yellow]Balance check coming soon[/yellow]")
+        console.print("\nView your full balance at: https://www.clausi.ai/dashboard")
     else:
-        console.print("[yellow]No API token found[/yellow]")
-        console.print("Run a scan to get a trial token or purchase credits.") 
+        console.print("[yellow]No account found[/yellow]")
+        console.print("Run a scan to create a free trial account ($2.00 credit included).") 
