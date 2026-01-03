@@ -1,0 +1,62 @@
+# Clausi CLI - Ignore patterns for compliance scanning
+# Uses the same syntax as .gitignore
+
+# Clausi output directories (don't scan own reports)
+clausi/
+reports/  # Legacy output directory
+
+# Test files and directories
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# Development files
+.env
+.env.local
+.env.*.local
+*.log
+logs/
+
+# Temporary files
+temp/
+tmp/
+.tmp/
+*.tmp
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation and examples
+docs/
+examples/
+*.md
+README*
+
+# Configuration files that might contain sensitive data
+config.local.py
+secrets.json
+*.key
+*.pem 

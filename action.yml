@@ -1,0 +1,85 @@
+name: 'Clausi Compliance Scan'
+description: 'Scan your code for AI compliance issues against EU AI Act, GDPR, and other regulations'
+
+inputs:
+  path:
+    description: 'Path to scan (default: repository root)'
+    required: false
+    default: '.'
+  mode:
+    description: 'Scan mode (ai or full)'
+    required: false
+    default: 'ai'
+  min-severity:
+    description: 'Minimum severity to report (info, warning, high, critical)'
+    required: false
+    default: 'info'
+  max-cost:
+    description: 'Maximum cost in dollars (e.g., 5.00)'
+    required: false
+    default: '10.00'
+  regulations:
+    description: 'Comma-separated list of regulations (EU-AIA,GDPR,ISO-42001,HIPAA,SOC2)'
+    required: false
+    default: 'EU-AIA'
+  format:
+    description: 'Report format (pdf, html, json, all)'
+    required: false
+    default: 'html'
+  template:
+    description: 'Report template (default, detailed, executive)'
+    required: false
+    default: 'default'
+  ignore:
+    description: 'Comma-separated list of files/directories to ignore'
+    required: false
+    default: ''
+  openai-key:
+    description: 'OpenAI API key (required)'
+    required: true
+  skip-confirmation:
+    description: 'Skip confirmation prompt (default: true for CI)'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+        
+    - name: Install Clausi CLI
+      run: pip install clausi-cli
+      shell: bash
+      
+    - name: Configure Clausi
+      run: |
+        clausi config set --openai-key "${{ inputs.openai-key }}"
+      shell: bash
+      
+    - name: Run compliance scan
+      run: |
+        clausi scan "${{ inputs.path }}" \
+          --mode "${{ inputs.mode }}" \
+          --min-severity "${{ inputs.min-severity }}" \
+          --max-cost "${{ inputs.max-cost }}" \
+          --format "${{ inputs.format }}" \
+          --template "${{ inputs.template }}" \
+          --skip-confirmation="${{ inputs.skip-confirmation }}" \
+          $(echo "${{ inputs.regulations }}" | tr ',' '\n' | xargs -I {} echo "-r {}") \
+          $(if [ -n "${{ inputs.ignore }}" ]; then echo "${{ inputs.ignore }}" | tr ',' '\n' | xargs -I {} echo "--ignore {}"; fi)
+      shell: bash
+      continue-on-error: true
+      
+    - name: Upload scan report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: clausi-compliance-report
+        path: reports/
+        retention-days: 30 

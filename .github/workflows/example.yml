@@ -1,0 +1,23 @@
+name: Compliance Check
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  compliance-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Clausi Compliance Scan
+        uses: ./
+        with:
+          path: '.'
+          mode: 'ai'
+          max-cost: '5.00'
+          regulations: 'EU-AIA,GDPR'
+          format: 'html'
+          template: 'default'
+          openai-key: ${{ secrets.OPENAI_API_KEY }}
+          skip-confirmation: 'true' 

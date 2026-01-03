@@ -1,0 +1,19 @@
+# Clausi CLI Configuration
+# Copy this file to ~/.config/clausi/config.yml or ./clausi.yml
+
+api:
+  # Your API key from https://clausi.ai
+  key: "your-api-key-here"
+  
+  # Request timeout in seconds
+  timeout: 300
+  
+  # Number of retries for failed requests
+  max_retries: 3
+
+report:
+  # Report format (pdf, html, json)
+  format: "pdf"
+  
+  # Default output directory for reports
+  output_dir: "reports" 

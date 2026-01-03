@@ -1,0 +1,45 @@
+# Include essential documentation
+include README.md
+include LICENSE
+include pyproject.toml
+include .clausiignore
+
+# Include configuration examples
+include clausi/config.example.yml
+
+# Include all package data
+recursive-include clausi *.py
+recursive-include clausi *.yml
+recursive-include clausi *.yaml
+recursive-include clausi *.css
+recursive-include clausi *.md
+
+# Exclude development and internal files
+exclude dev_test.py
+exclude build_backend.py
+exclude setup_dev.py
+exclude test.sh
+exclude test.bat
+exclude test_backend_integration.sh
+exclude *.backup
+
+# Exclude development directories
+recursive-exclude CLAUDE *
+recursive-exclude .claude *
+recursive-exclude tests *
+recursive-exclude venv *
+recursive-exclude .github *
+
+# Exclude generated outputs
+recursive-exclude clausi/reports *
+recursive-exclude reports *
+
+# Exclude build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.egg-info
+global-exclude .pytest_cache
+global-exclude .ruff_cache
