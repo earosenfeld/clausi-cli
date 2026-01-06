@@ -1,68 +1,24 @@
 # Clausi CLI
 
-> Modern command-line interface for AI compliance auditing against **EU AI Act**, **GDPR**, **ISO 42001**, and more.
+> AI-powered compliance auditing for **EU AI Act**, **GDPR**, **ISO 42001**, **HIPAA**, and **SOC 2**.
 
-**Version:** 1.0.1 | **AI Providers:** Claude (Anthropic) + OpenAI
+**Version:** 1.0.1 | **Python:** 3.8+ | **License:** MIT
 
 ---
-
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [New in v1.0.1](#new-in-v101)
-5. [Configuration](#configuration)
-6. [Scanning Projects](#scanning-projects)
-7. [Environment Variables](#environment-variables)
-8. [File Ignoring](#file-ignoring)
-9. [GitHub Actions](#github-actions)
-10. [API Endpoints](#api-endpoints)
-11. [Development & Contribution](#development--contribution)
-12. [License](#license)
 
----
-
-## Overview
-Clausi CLI submits source-code and metadata to the hosted Clausi platform
-(`https://api.clausi.ai`) which returns a compliance report in the format of
-your choice (PDF, HTML, JSON).
-
-Supported regulatory frameworks (built-in):
-
-| Key    | Regulation                                              |
-|--------|---------------------------------------------------------|
-| EU-AIA | European Union Artificial Intelligence Act (EU AI Act)  |
-| GDPR   | General Data Protection Regulation                      |
-| ISO-42001 | ISO/IEC 42001 AI Management System |
-| HIPAA | Health Insurance Portability and Accountability Act |
-| SOC2 | SOC 2 – System and Organization Controls Type 2 |
-
-### Custom Regulations
-
-You can create your own regulations with custom clauses! Place YAML files in `~/.clausi/custom_regulations/` or `.clausi/regulations/` (project-specific).
-
-**Example** (`~/.clausi/custom_regulations/company-security.yml`):
-```yaml
-name: "Company Security Policy"
-description: "Internal security requirements"
-version: "1.0"
-
-clauses:
-  - id: "SEC-001"
-    title: "Authentication Requirements"
-    requirements:
-      - "Implement multi-factor authentication"
-      - "Support TOTP or hardware security keys"
-    severity: "critical"
-```
-
-Then use it:
-```bash
-clausi scan . -r COMPANY-SECURITY
-```
-
-See full guide: `python -c "from clausi.utils import custom_regulations_README; print(custom_regulations_README.__file__)"`
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Interactive Mode](#interactive-mode)
+4. [Direct Commands](#direct-commands)
+5. [AI Providers](#ai-providers)
+6. [Pricing](#pricing)
+7. [Configuration](#configuration)
+8. [Custom Regulations](#custom-regulations)
+9. [CLI Reference](#cli-reference)
+10. [GitHub Actions](#github-actions)
+11. [License](#license)
 
 ---
 
@@ -72,463 +28,455 @@ See full guide: `python -c "from clausi.utils import custom_regulations_README; 
 pip install clausi
 ```
 
-Python ≥ 3.8 is required.
+Verify installation:
+```bash
+clausi --version  # Should show: 1.0.1
+```
 
 ---
 
 ## Quick Start
 
-### **1. Install**
-```bash
-pip install clausi
-clausi --version  # Should show: 1.0.1
-```
-
-### **2. Run Your First Scan**
+### Option 1: Interactive Mode (Recommended)
 
 ```bash
-# Interactive mode (recommended for first-time users)
 clausi
-
-# Or use direct commands
-clausi scan .  # Uses Clausi AI (no API key required)
-
-# With features
-clausi scan . --preset critical-only --open-findings
 ```
 
-### **3. Optional: Use Your Own AI Provider**
+This launches a guided wizard with arrow-key navigation. Perfect for first-time users.
 
-If you prefer to use your own API keys:
+### Option 2: Direct Command
 
-**Option A: Claude (Anthropic)**
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-your-key-here
-clausi scan . --claude
-```
+# Scan current directory against EU AI Act
+clausi scan . -r EU-AIA
 
-**Option B: OpenAI**
-```bash
-export OPENAI_API_KEY=sk-your-key-here
-clausi scan . --openai gpt-4o
+# Scan with multiple regulations
+clausi scan . -r EU-AIA -r GDPR
 ```
-
 
 ---
 
-## New in v1.0.1
+## Interactive Mode
 
-### **🚀 Major Features**
+Run `clausi` with no arguments to launch the interactive TUI:
 
-1. **Interactive Mode** - Run `clausi` with no arguments for guided workflows
-   ```bash
-   clausi  # Launches interactive menu with arrow key navigation
-   ```
+```
+$ clausi
 
-2. **Flexible AI Provider Options**
-   ```bash
-   clausi scan .               # Uses Clausi AI (no API key required)
-   clausi scan . --claude      # Uses Claude with your Anthropic API key
-   clausi scan . --openai gpt-4o  # Uses OpenAI with your API key
-   clausi models list          # View all available models
-   ```
+Clausi - AI Compliance Auditing
 
-3. **Clause Scoping** - Reduce scan time and cost by 60-80%
-   ```bash
-   clausi scan . --preset critical-only  # Only critical clauses
-   clausi scan . --include EUAIA-3.1     # Specific clauses
-   ```
+? What would you like to do?
+→ 1. Scan a project for compliance
+  2. Generate documentation
+  3. View remediation guide
+  4. View configuration
+  5. List available AI models
+  6. Run setup wizard
+  7. Show help
+  8. Exit Clausi
+```
 
-4. **Markdown-First Output** - Auto-open findings in your editor
-   ```bash
-   clausi scan . --open-findings      # Auto-opens findings.md
-   clausi scan . --show-markdown      # Terminal preview
-   ```
+### Features
 
-5. **Cache Statistics** - See cost savings from caching
-   ```bash
-   clausi scan . --show-cache-stats
-   # Output: Cache Hit Rate: 80%, Cost Saved: $2.25
-   ```
+**Main Menu Options:**
+- **Scan a project** - Full scan wizard with step-by-step guidance
+- **Generate documentation** - AI-powered docs generation for your codebase
+- **View remediation guide** - Open previously generated fix suggestions
+- **View configuration** - Display current settings
+- **List AI models** - Show available Claude and OpenAI models
+- **Setup wizard** - Configure API keys and preferences
 
+**Scan Wizard Steps:**
+
+1. **Select project location**
+   - Current directory
+   - Open native file explorer (Windows/Mac/Linux)
+   - Browse directories in terminal
+   - Type path manually
+
+2. **Choose AI provider**
+   - Clausi AI (no API key needed)
+   - Claude BYOK (your Anthropic key)
+   - OpenAI BYOK (your OpenAI key)
+
+3. **Select model** (for BYOK modes)
+   - Claude: claude-sonnet-4, claude-3-5-sonnet, claude-3-5-haiku
+   - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
+
+4. **Choose regulations**
+   - Single regulation (quick select)
+   - Multiple regulations
+   - Custom regulations
+   - Create new custom regulation inline
+
+5. **Select preset** (optional)
+   - Standard scan (all clauses)
+   - Critical-only (faster, cheaper)
+   - High-priority
+
+After configuration, the wizard shows the equivalent CLI command and runs the scan.
+
+---
+
+## Direct Commands
+
+### Basic Scan
+
+```bash
+# Scan current directory
+clausi scan .
+
+# Scan specific path
+clausi scan /path/to/project
+
+# Scan with specific regulation
+clausi scan . -r EU-AIA
+
+# Multiple regulations
+clausi scan . -r EU-AIA -r GDPR -r HIPAA
+```
+
+### Clause Scoping
+
+Reduce scan time and cost by focusing on specific clauses:
+
+```bash
+# Only critical clauses (60-80% cost reduction)
+clausi scan . --preset critical-only
+
+# Only high-priority clauses
+clausi scan . --preset high-priority
+
+# Include specific clauses
+clausi scan . --include EUAIA-3.1 --include EUAIA-9.1
+
+# Exclude specific clauses
+clausi scan . --exclude EUAIA-10.2
+```
+
+### Output Options
+
+```bash
+# Auto-open findings in your editor
+clausi scan . --open-findings
+
+# Show summary in terminal
+clausi scan . --show-markdown
+
+# Show cache statistics (cost savings)
+clausi scan . --show-cache-stats
+
+# Choose report format
+clausi scan . --format pdf      # Default
+clausi scan . --format html
+clausi scan . --format json
+clausi scan . --format all      # All formats
+```
+
+### Other Commands
+
+```bash
+# Check account balance
+clausi balance
+
+# View/edit configuration
+clausi config show
+clausi config edit
+
+# Setup wizard
+clausi setup
+
+# List available AI models
+clausi models list
+
+# Generate documentation
+clausi docs /path/to/project
+
+# Authenticate
+clausi login
+```
+
+---
+
+## AI Providers
+
+Clausi supports three modes of operation:
+
+### 1. Clausi AI (Default)
+
+No API key required. We handle the AI calls.
+
+```bash
+clausi scan .
+```
+
+### 2. Claude BYOK (Bring Your Own Key)
+
+Use your Anthropic API key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+clausi scan . --claude
+
+# Or specify a model
+clausi scan . --claude claude-sonnet-4-20250514
+```
+
+### 3. OpenAI BYOK
+
+Use your OpenAI API key:
+
+```bash
+export OPENAI_API_KEY=sk-your-key-here
+clausi scan . --openai
+
+# Or specify a model
+clausi scan . --openai gpt-4o
+```
+
+---
+
+## Pricing
+
+### Clausi AI (Hosted)
+
+- **Minimum:** $3.00 per scan (covers up to 100k lines of code)
+- **Above 100k LOC:** +$0.40 per additional 100k lines
+- **Maximum:** 200k LOC per scan (use BYOK for larger projects)
+
+### BYOK (Bring Your Own Key)
+
+- **Platform fee:** $0.50 minimum, +$0.10 per 100k LOC above 100k
+- **No size limit** - scan projects of any size
+- **You pay AI costs** directly to Anthropic/OpenAI
+
+### Credits
+
+- 1 credit = $0.10
+- New accounts start with 20 free credits ($2.00 value)
+- Purchase more at https://clausi.ai
 
 ---
 
 ## Configuration
-All settings live in a single YAML file:
 
+Configuration file location:
 ```
-Windows : %USERPROFILE%\.clausi\config.yml
-macOS/Linux : ~/.clausi/config.yml
+Windows:     %USERPROFILE%\.clausi\config.yml
+macOS/Linux: ~/.clausi/config.yml
 ```
 
-Typical structure:
+Example configuration:
 ```yaml
-api_token: ""                    # Your Clausi account token (auto-saved after login)
+api_token: "cltoken_..."          # Auto-saved after login
 
 api_keys:
-  openai: "sk-..."               # Your OpenAI API key (for --openai mode)
-  anthropic: "sk-ant-..."        # Your Anthropic API key (for --claude mode)
+  anthropic: "sk-ant-..."         # For --claude mode
+  openai: "sk-..."                # For --openai mode
 
 api:
-  url: https://api.clausi.ai     # API endpoint
+  url: https://api.clausi.ai
   timeout: 300
 
-report:
-  format: pdf                    # pdf | html | json | all
-  output_dir: clausi/reports
-  company_name: "ACME Corp"
-  company_logo: "C:/assets/logo.png"
-  template: default              # default | detailed | executive
-
-regulations:
-  selected:
-    - EU-AIA
-    - GDPR
+ui:
+  show_markdown: true             # Show summary after scan
+  auto_open_findings: true        # Auto-open findings.md
 ```
 
-Useful commands:
-| Command                       | Purpose                                |
-|--------------------------------|----------------------------------------|
-| `clausi config show`           | Display current configuration          |
-| `clausi config set [...]`      | Update one or more fields              |
-| `clausi config edit`           | Open the YAML in `$EDITOR` / Notepad   |
-| `clausi config path`           | Print the config file location         |
+### Config Commands
+
+```bash
+clausi config show    # Display current config
+clausi config edit    # Open in editor
+clausi config path    # Print config file location
+```
 
 ---
 
-## Scanning Projects
-Basic syntax:
-```bash
-clausi scan PATH [options]
+## Custom Regulations
+
+Create your own compliance regulations with custom clauses.
+
+### Locations
+
+- **Global:** `~/.clausi/custom_regulations/*.yml`
+- **Project-specific:** `.clausi/regulations/*.yml`
+
+### Example
+
+Create `~/.clausi/custom_regulations/company-security.yml`:
+
+```yaml
+name: "Company Security Policy"
+description: "Internal security requirements"
+version: "1.0"
+
+clauses:
+  - id: "SEC-001"
+    title: "Authentication Requirements"
+    description: "All systems must implement proper authentication"
+    requirements:
+      - "Implement multi-factor authentication"
+      - "Support TOTP or hardware security keys"
+    severity: "critical"
+
+  - id: "SEC-002"
+    title: "Data Encryption"
+    description: "Sensitive data must be encrypted"
+    requirements:
+      - "Encrypt data at rest using AES-256"
+      - "Use TLS 1.3 for data in transit"
+    severity: "high"
 ```
 
-Common options:
-| Flag                         | Description                                              |
-|------------------------------|----------------------------------------------------------|
-| `-r`, `--regulation`         | Regulation key (repeat for multiple)                     |
-| `--mode ai \| full`          | `ai` = lightweight analysis (default), `full` = deep scan |
-| `--min-severity`             | Minimum severity to report (info, warning, high, critical) |
-| `--format pdf \| html \| json \| all`| Report format (use 'all' for PDF, HTML, and JSON)     |
-| `--template`                 | Report template (`default`, `detailed`, `executive`)     |
-| `-o`, `--output`             | Output directory (otherwise uses config)                 |
-| `--max-cost`                 | Maximum cost in dollars (e.g., --max-cost 1.00)          |
-| `--skip-confirmation`        | Skip the confirmation prompt                             |
-| `--show-details`             | Show per-file token estimates                            |
-| `--ignore`                   | Ignore files/directories (can be given multiple times)   |
+### Usage
 
-Examples:
 ```bash
-# EU AI Act – fast scan
-clausi scan . -r EU-AIA --mode ai
+# Use custom regulation
+clausi scan . -r COMPANY-SECURITY
 
-# GDPR deep scan, HTML report
-clausi scan /srv/app -r GDPR --mode full --format html
-
-# Scan against both regulations, use detailed template
-clausi scan ~/project -r EU-AIA -r GDPR --template detailed
-
-# Generate all report formats simultaneously
-clausi scan . --format all
-
-# Only report high and critical severity issues
-clausi scan . -r EU-AIA --min-severity high
-
-# Cost-controlled scan with confirmation skipped
-clausi scan . --max-cost 5.00 --skip-confirmation
-
-# Ignore specific files and directories
-clausi scan . --ignore "tests/" --ignore "*.log" --ignore "temp/"
-
-# Use .clausiignore file (same rules as .gitignore)
-clausi scan . --min-severity warning
+# Combine with built-in regulations
+clausi scan . -r EU-AIA -r COMPANY-SECURITY
 ```
 
-Upon completion the CLI prints a table of findings and stores:
-* `audit.<pdf|html|json>` – the full report
-* `audit_metadata.json` – summary of the scan session
+### Create via Interactive Mode
+
+The interactive mode can create custom regulations for you:
+
+1. Run `clausi`
+2. Select "Scan a project"
+3. At regulation selection, choose "Create new custom regulation"
+4. Follow the prompts
 
 ---
 
-## Environment Variables
-| Variable           | Purpose                                   |
-|--------------------|-------------------------------------------|
-| `ANTHROPIC_API_KEY`| Anthropic API key for `--claude` mode     |
-| `OPENAI_API_KEY`   | OpenAI API key for `--openai` mode        |
-| `CLAUSI_OUTPUT_DIR`| Overrides `report.output_dir`             |
-| `CLAUSI_TUNNEL_BASE`| Overrides the API base URL (e.g., for tunnel connections) |
+## CLI Reference
 
-Precedence: **CLI flag → environment variable → config file → default**.
+### Global Options
 
-### Using CLAUSI_TUNNEL_BASE
-
-The `CLAUSI_TUNNEL_BASE` environment variable allows you to override the default API URL. This is useful when using tunnel connections or when the backend is hosted at a different URL.
-
-```bash
-# Use tunnel connection
-CLAUSI_TUNNEL_BASE=https://api.clausi.ai clausi scan .
-
-# Use local development server
-CLAUSI_TUNNEL_BASE=http://localhost:8000 clausi scan .
-
-# Check current configuration (shows tunnel indicator)
-clausi config show
+```
+clausi --version    Show version
+clausi --help       Show help
 ```
 
-When `CLAUSI_TUNNEL_BASE` is set, the CLI will display it in the configuration with a tunnel indicator: `https://api.clausi.ai (via CLAUSI_TUNNEL_BASE)`.
+### Commands
 
----
+| Command | Description |
+|---------|-------------|
+| `clausi` | Launch interactive mode |
+| `clausi scan PATH` | Run compliance scan |
+| `clausi docs PATH` | Generate documentation |
+| `clausi balance` | Show account balance |
+| `clausi login` | Authenticate with Clausi |
+| `clausi setup` | First-time setup wizard |
+| `clausi config show` | Display configuration |
+| `clausi config edit` | Edit configuration |
+| `clausi models list` | List available AI models |
 
-## File Ignoring
+### Scan Options
 
-Clausi CLI supports ignoring files and directories using `.clausiignore` files and command-line patterns.
-
-### .clausiignore File
-
-Create a `.clausiignore` file in your project root (or any parent directory) to specify files and directories to exclude from analysis. Uses the same syntax as `.gitignore`:
-
-```bash
-# Ignore test files
-tests/
-test_*.py
-
-# Ignore build artifacts
-build/
-dist/
-*.egg-info/
-
-# Ignore logs and temporary files
-*.log
-temp/
-tmp/
-
-# Ignore specific files
-config.local.py
-secrets.json
-```
-
-### Command-line Ignoring
-
-Use the `--ignore` flag to specify patterns directly:
-
-```bash
-# Ignore multiple patterns
-clausi scan . --ignore "tests/" --ignore "*.log" --ignore "temp/"
-
-# Ignore specific files
-clausi scan . --ignore "config.local.py" --ignore "secrets.json"
-```
-
-### Ignore Rules
-
-- **Patterns**: Use glob patterns (e.g., `*.py`, `tests/`, `**/temp/`)
-- **Comments**: Lines starting with `#` are ignored
-- **Search Path**: CLI searches upward from project root for `.clausiignore`
-- **Combined**: Both `.clausiignore` and `--ignore` patterns are applied
-- **Fallback**: If `pathspec` library is unavailable, ignore functionality is disabled
+| Option | Description |
+|--------|-------------|
+| `-r, --regulation TEXT` | Regulation to scan against (can repeat) |
+| `--claude [MODEL]` | Use Claude with your API key |
+| `--openai [MODEL]` | Use OpenAI with your API key |
+| `--preset TEXT` | Use preset: `critical-only`, `high-priority` |
+| `--include TEXT` | Include specific clauses (can repeat) |
+| `--exclude TEXT` | Exclude specific clauses (can repeat) |
+| `--format FORMAT` | Output: `pdf`, `html`, `json`, `all` |
+| `--open-findings` | Auto-open findings.md after scan |
+| `--show-markdown` | Display summary in terminal |
+| `--show-cache-stats` | Show cache hit/miss statistics |
+| `--skip-confirmation` | Skip cost confirmation prompt |
+| `--max-cost FLOAT` | Maximum cost limit in dollars |
+| `--ignore PATTERN` | Ignore files/dirs (can repeat) |
+| `-o, --output PATH` | Output directory |
+| `-v, --verbose` | Verbose output |
 
 ---
 
 ## GitHub Actions
 
-[![Clausi Compliance Scan](https://github.com/clausi/clausi-cli/workflows/Compliance%20Check/badge.svg)](https://github.com/clausi/clausi-cli/actions)
+Automate compliance checks in your CI/CD pipeline:
 
-Automate compliance checks in your CI/CD pipeline with the Clausi GitHub Action.
-
-### Quick Setup
-
-1. **Add the action to your workflow:**
-   ```yaml
-   name: Compliance Check
-   
-   on:
-     pull_request:
-       branches: [ main ]
-   
-   jobs:
-     compliance-scan:
-       runs-on: ubuntu-latest
-       steps:
-         - name: Run Clausi Compliance Scan
-           uses: ./
-           with:
-             openai-key: ${{ secrets.OPENAI_API_KEY }}
-   ```
-
-2. **Set up the secret:**
-   - Go to your repository Settings → Secrets and variables → Actions
-   - Add `OPENAI_API_KEY` with your OpenAI API key
-
-3. **Customize the scan:**
-   ```yaml
-   - name: Run Clausi Compliance Scan
-     uses: ./
-     with:
-       path: 'src/'                    # Scan specific directory
-       mode: 'full'                    # Deep analysis
-       max-cost: '5.00'               # Cost limit
-       regulations: 'EU-AIA,GDPR'     # Multiple regulations
-       format: 'html'                 # Report format
-       template: 'detailed'           # Report template
-       openai-key: ${{ secrets.OPENAI_API_KEY }}
-   ```
-
-### Action Inputs
-
-| Input | Description | Default | Required |
-|-------|-------------|---------|----------|
-| `path` | Path to scan | `.` | No |
-| `mode` | Scan mode (`ai` or `full`) | `ai` | No |
-| `min-severity` | Minimum severity to report | `info` | No |
-| `max-cost` | Maximum cost in dollars | `10.00` | No |
-| `regulations` | Comma-separated regulations | `EU-AIA` | No |
-| `format` | Report format (`pdf`, `html`, `json`, `all`) | `html` | No |
-| `template` | Report template | `default` | No |
-| `ignore` | Comma-separated ignore patterns | `` | No |
-| `openai-key` | OpenAI API key | - | **Yes** |
-| `skip-confirmation` | Skip confirmation prompt | `true` | No |
-
-### Example Workflows
-
-**Basic compliance check:**
 ```yaml
-- uses: ./
-  with:
-    openai-key: ${{ secrets.OPENAI_API_KEY }}
-```
+name: Compliance Check
 
-**Comprehensive audit:**
-```yaml
-- uses: ./
-  with:
-    mode: 'full'
-    max-cost: '20.00'
-    regulations: 'EU-AIA,GDPR,ISO-42001'
-    format: 'pdf'
-    template: 'detailed'
-    openai-key: ${{ secrets.OPENAI_API_KEY }}
-```
+on:
+  pull_request:
+    branches: [main]
 
-**Cost-conscious scanning:**
-```yaml
-- uses: ./
-  with:
-    mode: 'ai'
-    max-cost: '2.00'
-    regulations: 'EU-AIA'
-    format: 'html'
-    openai-key: ${{ secrets.OPENAI_API_KEY }}
-```
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-**With ignore patterns:**
-```yaml
-- uses: ./
-  with:
-    mode: 'ai'
-    min-severity: 'warning'
-    ignore: 'tests/,*.log,temp/'
-    openai-key: ${{ secrets.OPENAI_API_KEY }}
-```
+      - name: Install Clausi
+        run: pip install clausi
 
-**Generate all report formats:**
-```yaml
-- uses: ./
-  with:
-    format: 'all'
-    openai-key: ${{ secrets.OPENAI_API_KEY }}
-```
+      - name: Run Compliance Scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          clausi scan . -r EU-AIA --claude --skip-confirmation --format html
 
-The action will:
-- Install and configure Clausi CLI
-- Run the compliance scan
-- Upload the report as an artifact
-- Continue on error (won't fail your build)
-
----
-
-## API Endpoints
-The CLI communicates with the Clausi platform through two main endpoints:
-
-### 1. `/api/clausi/estimate`
-Estimates token usage and cost before running the full scan.
-
-**Expected Response:**
-```json
-{
-  "total_tokens": 1234,
-  "prompt_tokens": 1000,
-  "completion_tokens": 234,
-  "estimated_cost": 0.002,
-  "regulation_breakdown": [
-    {
-      "regulation": "EU-AIA",
-      "total_tokens": 1234,
-      "estimated_cost": 0.002
-    }
-  ],
-  "file_breakdown": [
-    {
-      "path": "path/to/file.py",
-      "tokens": 200,
-      "estimated_cost": 0.0004,
-      "too_large": false
-    }
-  ]
-}
-```
-
-### 2. `/api/clausi/scan`
-Performs the actual compliance analysis and generates the report.
-
-**Expected Response:**
-```json
-{
-  "findings": [
-    {
-      "clause_id": "A.1.2",
-      "violation": true,
-      "severity": "high",
-      "location": "file.py:123",
-      "description": "Description of the finding"
-    }
-  ],
-  "token_usage": {
-    "total_tokens": 1234,
-    "cost": 0.002
-  },
-  "generated_reports": [
-    {
-      "format": "pdf",
-      "filename": "audit.pdf"
-    },
-    {
-      "format": "html", 
-      "filename": "audit.html"
-    },
-    {
-      "format": "json",
-      "filename": "audit.json"
-    }
-  ]
-}
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report
+          path: clausi/
 ```
 
 ---
 
-## Development & Contribution
-1. Install dev dependencies as shown in the installation table.
-2. Run tests:
-   ```bash
-   pytest
-   ```
-3. Lint and format:
-   ```bash
-   ruff check .    # static analysis
-   ruff format .   # auto-format (Black style)
-   ```
-4. Submit pull requests against `main`.
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key for `--claude` mode |
+| `OPENAI_API_KEY` | OpenAI API key for `--openai` mode |
+| `CLAUSI_TUNNEL_BASE` | Override API URL (for local dev) |
+
+Precedence: CLI flag → Environment variable → Config file → Default
+
+---
+
+## File Ignoring
+
+Create `.clausiignore` in your project root (same syntax as `.gitignore`):
+
+```bash
+# Ignore test files
+tests/
+*_test.py
+
+# Ignore build artifacts
+build/
+dist/
+node_modules/
+
+# Ignore logs
+*.log
+```
+
+Or use the `--ignore` flag:
+
+```bash
+clausi scan . --ignore "tests/" --ignore "*.log"
+```
+
+---
+
+## Support
+
+- **Website:** https://clausi.ai
+- **Documentation:** https://docs.clausi.ai
+- **GitHub:** https://github.com/earosenfeld/clausi-cli
 
 ---
 
 ## License
-Licensed under the MIT License – © Clausi 2025.
+
+MIT License - © Clausi 2025

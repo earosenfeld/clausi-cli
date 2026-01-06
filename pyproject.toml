@@ -41,6 +41,7 @@ dependencies = [
 
 [project.urls]
 "Homepage" = "https://clausi.ai"
+"Repository" = "https://github.com/earosenfeld/clausi-cli"
 "Documentation" = "https://docs.clausi.ai"
 "Support" = "https://clausi.ai/contact"
 
