@@ -1,0 +1,202 @@
+# SOC 2 - Service Organization Control 2
+# Trust Services Criteria for service providers
+name: "SOC 2"
+description: "Service Organization Control 2 - Trust Services Criteria for service providers"
+clauses:
+  - id: "CC1-Common-Criteria-1"
+    title: "Control Environment"
+    description: "Organization demonstrates commitment to integrity and ethical values"
+    requirements:
+      - "Establish tone at top demonstrating commitment to integrity and ethical values"
+      - "Exercise oversight responsibility for internal control including security and privacy"
+      - "Establish structures, reporting lines and authorities to achieve objectives"
+      - "Demonstrate commitment to competence including security and privacy responsibilities"
+      - "Hold individuals accountable for internal control responsibilities"
+
+  - id: "CC2-Common-Criteria-2"
+    title: "Communication and Information"
+    description: "Information systems support achievement of objectives"
+    requirements:
+      - "Obtain or generate relevant, quality information to support functioning of internal control"
+      - "Communicate security and privacy information internally including objectives and responsibilities"
+      - "Communicate with external parties regarding matters affecting security and privacy"
+      - "Provide mechanisms for reporting potential breaches and incidents"
+
+  - id: "CC3-Risk-Assessment"
+    title: "Risk Assessment Process"
+    description: "Identify and assess risks to achievement of objectives"
+    requirements:
+      - "Specify objectives with sufficient clarity to identify and assess risks"
+      - "Identify risks to achievement of security and privacy objectives"
+      - "Consider potential for fraud in assessing risks to objectives"
+      - "Identify and assess changes that could significantly impact internal control system"
+      - "Conduct risk assessments at planned intervals and when significant changes occur"
+
+  - id: "CC4-Monitoring"
+    title: "Monitoring Activities"
+    description: "Monitor internal control system and evaluate results"
+    requirements:
+      - "Establish and operate monitoring activities to monitor internal control system"
+      - "Evaluate and communicate internal control deficiencies in timely manner"
+      - "Perform ongoing and separate evaluations of security and privacy controls"
+      - "Remediate identified deficiencies in timely manner"
+
+  - id: "CC5-Control-Activities"
+    title: "Control Activities"
+    description: "Deploy control activities through policies and procedures"
+    requirements:
+      - "Select and develop control activities that contribute to mitigation of risks"
+      - "Select and develop general control activities over technology"
+      - "Deploy control activities through policies establishing expectations and procedures"
+      - "Review control activities for continued relevance and effectiveness"
+
+  - id: "CC6-Logical-Access"
+    title: "Logical and Physical Access Controls"
+    description: "Restrict logical and physical access to authorized users"
+    requirements:
+      - "Implement logical access security measures to protect against threats from sources outside boundaries"
+      - "Identify and authenticate users before granting access to system"
+      - "Consider network segmentation in system design and implementation"
+      - "Restrict access to information assets based on user roles and least privilege"
+      - "Remove access promptly when no longer required"
+      - "Implement physical access controls to facilities and hardware"
+      - "Protect confidential information during transmission and storage"
+
+  - id: "CC7-System-Operations"
+    title: "System Operations"
+    description: "Manage system operations to meet objectives"
+    requirements:
+      - "Detect and respond to system security and availability incidents"
+      - "Identify, report and act upon system security and availability incidents"
+      - "Restore services after incidents to meet objectives"
+      - "Implement change management process for infrastructure and software"
+      - "Authorize, design, test and approve changes before implementation"
+      - "Deploy system changes in controlled manner"
+
+  - id: "CC8-Change-Management"
+    title: "Change Management"
+    description: "Manage system changes to maintain security and availability"
+    requirements:
+      - "Authorize, design, develop, configure, document and test changes before deployment"
+      - "Track system changes from request to implementation"
+      - "Maintain change management documentation and approvals"
+      - "Communicate changes to affected parties"
+      - "Implement emergency change procedures for urgent situations"
+      - "Review and approve emergency changes after implementation"
+
+  - id: "CC9-Risk-Mitigation"
+    title: "Risk Mitigation"
+    description: "Implement activities to mitigate identified risks"
+    requirements:
+      - "Identify, select and develop risk mitigation activities"
+      - "Assess severity of identified risks to determine priority"
+      - "Implement risk mitigation activities consistent with risk tolerance"
+      - "Reassess risks and risk mitigation activities periodically"
+
+  - id: "A1-Availability"
+    title: "Availability"
+    description: "System is available for operation and use as committed or agreed"
+    requirements:
+      - "Maintain, monitor and evaluate system components to meet availability objectives"
+      - "Implement redundancy and failover capabilities where required"
+      - "Perform backups of data and systems to support availability commitments"
+      - "Test backup and restoration procedures regularly"
+      - "Document and maintain disaster recovery and business continuity plans"
+      - "Monitor system performance and capacity to identify and resolve availability issues"
+
+  - id: "PI1-Processing-Integrity"
+    title: "Processing Integrity"
+    description: "System processing is complete, valid, accurate, timely and authorized"
+    requirements:
+      - "Implement controls to ensure input data is complete, accurate and valid"
+      - "Verify system processing is complete and accurate"
+      - "Ensure outputs are complete, accurate, timely and valid"
+      - "Maintain data integrity throughout processing lifecycle"
+      - "Implement error detection and correction mechanisms"
+      - "Monitor processing to detect and respond to processing failures or anomalies"
+
+  - id: "C1-Confidentiality"
+    title: "Confidentiality"
+    description: "Information designated as confidential is protected as committed or agreed"
+    requirements:
+      - "Identify and classify confidential information"
+      - "Protect confidential information during storage and transmission using encryption"
+      - "Dispose of confidential information securely when no longer needed"
+      - "Limit access to confidential information to authorized users"
+      - "Implement data loss prevention controls"
+      - "Monitor and log access to confidential information"
+
+  - id: "P1-Privacy-Notice"
+    title: "Privacy - Notice and Communication"
+    description: "Provide notice about privacy practices and communicate changes"
+    requirements:
+      - "Provide notice of privacy practices to data subjects at or before collection"
+      - "Describe types of personal information collected and purposes for collection"
+      - "Communicate how to exercise privacy rights and choices"
+      - "Notify data subjects of changes to privacy practices"
+      - "Describe retention and disposal practices for personal information"
+
+  - id: "P2-Privacy-Choice"
+    title: "Privacy - Choice and Consent"
+    description: "Provide choice and obtain consent regarding collection and use"
+    requirements:
+      - "Obtain implicit or explicit consent for collection, use and disclosure of personal information"
+      - "Provide mechanism for individuals to provide consent"
+      - "Implement processes to honor individuals' withdrawal of consent"
+      - "Communicate consequences of refusing to provide or withdrawing consent"
+      - "Obtain separate explicit consent for sensitive personal information"
+
+  - id: "P3-Privacy-Collection"
+    title: "Privacy - Collection"
+    description: "Collect personal information consistent with objectives in notice"
+    requirements:
+      - "Limit collection of personal information to what is necessary for purposes identified in notice"
+      - "Collect personal information by fair and lawful means"
+      - "Obtain personal information directly from individual when feasible"
+      - "Verify identity of individuals providing sensitive information"
+
+  - id: "P4-Privacy-Access"
+    title: "Privacy - Access, Correction and Deletion"
+    description: "Provide access and ability to correct or delete information"
+    requirements:
+      - "Provide individuals ability to access their personal information"
+      - "Enable individuals to update or correct inaccurate or incomplete information"
+      - "Enable individuals to request deletion of personal information"
+      - "Respond to requests for access, correction or deletion in timely manner"
+      - "Verify identity of individuals making requests before granting access"
+
+  - id: "P5-Privacy-Disclosure"
+    title: "Privacy - Disclosure to Third Parties"
+    description: "Disclose personal information to third parties with consent"
+    requirements:
+      - "Obtain consent before disclosing personal information to third parties"
+      - "Disclose personal information to third parties only for purposes identified in notice"
+      - "Implement agreements with third parties to maintain confidentiality of personal information"
+      - "Monitor third party compliance with privacy requirements"
+
+  - id: "P6-Privacy-Retention"
+    title: "Privacy - Retention and Disposal"
+    description: "Retain and dispose of personal information properly"
+    requirements:
+      - "Retain personal information consistent with objectives in notice or legal requirements"
+      - "Dispose of personal information securely when no longer needed"
+      - "Implement documented retention and disposal policies"
+      - "Remove or anonymize personal information when retention period expires"
+
+  - id: "P7-Privacy-Quality"
+    title: "Privacy - Data Quality and Integrity"
+    description: "Maintain accurate and complete personal information"
+    requirements:
+      - "Maintain accurate, complete and relevant personal information"
+      - "Update personal information when necessary to fulfill purposes"
+      - "Implement processes to identify and correct inaccurate or incomplete information"
+
+  - id: "P8-Privacy-Monitoring"
+    title: "Privacy - Monitoring and Enforcement"
+    description: "Monitor compliance with privacy commitments"
+    requirements:
+      - "Monitor compliance with privacy policies and commitments"
+      - "Establish procedures to address privacy inquiries, complaints and disputes"
+      - "Document and track privacy incidents and resolutions"
+      - "Provide mechanism for reporting suspected privacy violations"
+      - "Take corrective action when violations identified"

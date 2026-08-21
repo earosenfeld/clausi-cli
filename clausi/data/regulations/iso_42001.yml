@@ -1,0 +1,95 @@
+# ISO/IEC 42001:2023 - AI Management System Standard
+# International standard for AI governance
+name: "ISO/IEC 42001:2023"
+description: "AI Management System Standard - International standard for AI governance"
+clauses:
+  - id: "Clause-4"
+    title: "Context of the Organization"
+    description: "Understand organizational context for AI management system"
+    requirements:
+      - "Determine external and internal issues relevant to AI system purpose and strategic direction"
+      - "Identify interested parties relevant to AI management system and their requirements"
+      - "Determine scope of AI management system including boundaries and applicability"
+      - "Document AI management system scope including types of AI systems covered"
+      - "Consider legal, regulatory, contractual and ethical obligations when determining scope"
+
+  - id: "Clause-5"
+    title: "Leadership and Organizational Commitment"
+    description: "Ensure leadership commitment to AI management system"
+    requirements:
+      - "Demonstrate top management commitment and accountability for effectiveness of AI management system"
+      - "Ensure AI policy is established and compatible with strategic direction of organization"
+      - "Ensure AI management system requirements are integrated into organization's processes"
+      - "Promote use of process approach and risk-based thinking"
+      - "Ensure resources needed for AI management system are available"
+      - "Communicate importance of effective AI management and conforming to requirements"
+      - "Define, assign and communicate roles, responsibilities and authorities for AI system lifecycle"
+
+  - id: "Clause-6"
+    title: "Planning and Risk Assessment"
+    description: "Plan AI management system and address risks and opportunities"
+    requirements:
+      - "Consider issues from Clause 4 when planning AI management system"
+      - "Determine risks and opportunities that need to be addressed"
+      - "Plan actions to address risks and opportunities and integrate into AI management processes"
+      - "Establish AI objectives that are consistent with AI policy"
+      - "Ensure AI objectives are measurable, monitored, communicated and updated"
+      - "Plan how to achieve objectives including what will be done, resources required, responsibilities, completion times"
+      - "Conduct AI-specific risk assessments including bias, fairness, transparency, explainability, safety and security risks"
+
+  - id: "Clause-7"
+    title: "Support and Resources"
+    description: "Provide resources and support for AI management system"
+    requirements:
+      - "Determine and provide resources needed for establishment, implementation, maintenance and improvement"
+      - "Ensure personnel are competent based on appropriate education, training or experience"
+      - "Ensure awareness of AI policy, objectives, contribution to effectiveness and implications of non-conformity"
+      - "Determine internal and external communications relevant to AI management system"
+      - "Create and update documented information required by standard and needed for effectiveness"
+      - "Control documented information to ensure it is available, suitable for use and adequately protected"
+
+  - id: "Clause-8.1"
+    title: "Operational Planning and Control"
+    description: "Plan, implement and control processes for AI systems"
+    requirements:
+      - "Establish criteria for processes and implement control of processes in accordance with criteria"
+      - "Keep documented information to have confidence processes carried out as planned"
+      - "Control planned changes and review consequences of unintended changes"
+      - "Ensure outsourced processes are controlled and determined within AI management system"
+      - "Implement processes to address risks and opportunities identified in planning"
+
+  - id: "Clause-8.2"
+    title: "AI System Lifecycle Management"
+    description: "Manage AI systems throughout their complete lifecycle"
+    requirements:
+      - "Define and implement AI system design and development processes with appropriate controls"
+      - "Establish processes for data collection, labeling, preparation and management for AI"
+      - "Implement processes for AI model training, validation and testing"
+      - "Establish deployment procedures including staging, production release and rollback capabilities"
+      - "Implement monitoring and performance evaluation during operation"
+      - "Define processes for AI system updates, versioning and change management"
+      - "Establish decommissioning procedures for end-of-life AI systems"
+      - "Document all lifecycle stages and maintain traceability"
+
+  - id: "Clause-9"
+    title: "Performance Evaluation and Monitoring"
+    description: "Monitor, measure, analyze and evaluate AI management system"
+    requirements:
+      - "Determine what needs to be monitored and measured for AI systems"
+      - "Determine methods for monitoring, measurement, analysis and evaluation"
+      - "Determine when monitoring and measuring shall be performed"
+      - "Determine when results shall be analyzed and evaluated"
+      - "Conduct internal audits at planned intervals to provide information on AI management system conformity"
+      - "Conduct management review at planned intervals to ensure continuing suitability, adequacy and effectiveness"
+      - "Establish KPIs for AI system performance including accuracy, fairness, robustness and efficiency"
+
+  - id: "Clause-10"
+    title: "Continuous Improvement"
+    description: "Continually improve suitability, adequacy and effectiveness"
+    requirements:
+      - "Determine and select opportunities for improvement and implement necessary actions"
+      - "React to nonconformities and take action to control, correct and deal with consequences"
+      - "Evaluate need for action to eliminate causes of nonconformity"
+      - "Implement any action needed and review effectiveness of corrective action taken"
+      - "Make changes to AI management system if necessary"
+      - "Document results of corrective actions and improvements"

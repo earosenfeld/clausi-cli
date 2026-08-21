@@ -8,8 +8,6 @@ from clausi.utils.config import (
     get_anthropic_key,
     get_ai_provider,
     get_ai_model,
-    get_api_token,
-    save_api_token,
 )
 
 from clausi.utils.output import (
@@ -32,8 +30,6 @@ __all__ = [
     "get_anthropic_key",
     "get_ai_provider",
     "get_ai_model",
-    "get_api_token",
-    "save_api_token",
     "open_in_editor",
     "display_markdown",
     "display_markdown_summary",

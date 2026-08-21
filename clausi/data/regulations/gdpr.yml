@@ -1,0 +1,105 @@
+# GDPR - General Data Protection Regulation
+# EU data protection and privacy regulation
+name: "GDPR"
+description: "General Data Protection Regulation - EU data protection and privacy regulation"
+clauses:
+  - id: "Article-5"
+    title: "Principles Relating to Processing of Personal Data"
+    description: "Core principles for lawful processing of personal data"
+    requirements:
+      - "Process personal data lawfully, fairly and in transparent manner (lawfulness, fairness, transparency)"
+      - "Collect data for specified, explicit and legitimate purposes only (purpose limitation)"
+      - "Ensure data is adequate, relevant and limited to what is necessary (data minimisation)"
+      - "Keep accurate and up to date data; erase or rectify inaccurate data (accuracy)"
+      - "Keep data in identifiable form only as long as necessary (storage limitation)"
+      - "Process data in manner ensuring appropriate security including protection against unauthorised or unlawful processing (integrity and confidentiality)"
+      - "Demonstrate compliance with all principles (accountability)"
+
+  - id: "Article-6"
+    title: "Lawfulness of Processing"
+    description: "Legal basis required for processing personal data"
+    requirements:
+      - "Ensure at least one lawful basis applies: consent, contract, legal obligation, vital interests, public task, or legitimate interests"
+      - "Identify and document legal basis for each processing activity before processing begins"
+      - "Inform data subjects about legal basis in privacy notice"
+      - "Do not process data if no lawful basis can be identified"
+      - "For processing based on legitimate interests, conduct balancing test and document it"
+
+  - id: "Article-7"
+    title: "Conditions for Consent"
+    description: "Requirements when relying on consent as legal basis"
+    requirements:
+      - "Obtain freely given, specific, informed and unambiguous consent"
+      - "Use clear and plain language in consent requests"
+      - "Keep consent requests separate from other terms and conditions"
+      - "Allow data subjects to withdraw consent as easily as giving it"
+      - "Maintain proof that consent was obtained"
+      - "Ensure pre-ticked boxes or inactivity do not constitute consent"
+
+  - id: "Article-15-22"
+    title: "Data Subject Rights"
+    description: "Rights of individuals regarding their personal data"
+    requirements:
+      - "Enable right of access: provide copy of personal data being processed (Article 15)"
+      - "Enable right to rectification: correct inaccurate personal data (Article 16)"
+      - "Enable right to erasure ('right to be forgotten') when applicable (Article 17)"
+      - "Enable right to restriction of processing in certain circumstances (Article 18)"
+      - "Enable right to data portability: provide data in machine-readable format (Article 20)"
+      - "Enable right to object to processing based on legitimate interests or for direct marketing (Article 21)"
+      - "Implement rights not to be subject to solely automated decision-making including profiling (Article 22)"
+      - "Respond to data subject requests within one month"
+
+  - id: "Article-25"
+    title: "Data Protection by Design and by Default"
+    description: "Embed data protection into processing activities and systems"
+    requirements:
+      - "Implement appropriate technical and organisational measures at time of determining means of processing"
+      - "Integrate necessary safeguards into processing to meet GDPR requirements"
+      - "Implement measures to protect rights of data subjects"
+      - "Ensure by default only personal data necessary for specific purpose is processed"
+      - "Apply defaults that minimize data collection, extent of processing, storage period and accessibility"
+      - "Consider state of the art, cost of implementation, nature and risks when selecting measures"
+
+  - id: "Article-32"
+    title: "Security of Processing"
+    description: "Implement appropriate technical and organizational security measures"
+    requirements:
+      - "Implement pseudonymisation and encryption of personal data where appropriate"
+      - "Ensure ongoing confidentiality, integrity, availability and resilience of processing systems"
+      - "Ensure ability to restore availability and access to data in timely manner after incident"
+      - "Implement process for regularly testing, assessing and evaluating effectiveness of security measures"
+      - "Consider state of art, costs, nature, scope, context and purposes of processing when selecting measures"
+      - "Assess risks to rights and freedoms of natural persons when determining appropriate security level"
+
+  - id: "Article-33-34"
+    title: "Personal Data Breach Notification"
+    description: "Notify supervisory authority and data subjects of data breaches"
+    requirements:
+      - "Notify supervisory authority of breach within 72 hours of becoming aware (Article 33)"
+      - "Document all personal data breaches including facts, effects and remedial action"
+      - "Communicate breach to affected data subjects without undue delay when high risk to rights and freedoms (Article 34)"
+      - "Include in notification: nature of breach, contact point, likely consequences, measures taken or proposed"
+      - "Maintain breach register even if notification not required"
+
+  - id: "Article-35"
+    title: "Data Protection Impact Assessment (DPIA)"
+    description: "Conduct impact assessment for high-risk processing"
+    requirements:
+      - "Carry out DPIA before processing likely to result in high risk to rights and freedoms"
+      - "Conduct DPIA for systematic and extensive profiling with significant effects"
+      - "Conduct DPIA for large scale processing of special categories of data or criminal convictions"
+      - "Conduct DPIA for systematic monitoring of publicly accessible areas on large scale"
+      - "Include in DPIA: description of processing, assessment of necessity and proportionality, assessment of risks, measures to address risks"
+      - "Seek views of data subjects or their representatives where appropriate"
+      - "Consult supervisory authority if high risk cannot be mitigated"
+
+  - id: "Article-37"
+    title: "Designation of Data Protection Officer"
+    description: "Appoint DPO when required by GDPR"
+    requirements:
+      - "Designate DPO when processing carried out by public authority (except courts)"
+      - "Designate DPO when core activities require regular and systematic monitoring on large scale"
+      - "Designate DPO when core activities consist of large scale processing of special categories or criminal data"
+      - "Ensure DPO has professional qualities and expert knowledge of data protection law"
+      - "Provide DPO with necessary resources to carry out tasks and maintain expert knowledge"
+      - "Ensure DPO reports directly to highest management level"

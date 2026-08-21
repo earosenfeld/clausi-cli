@@ -51,6 +51,9 @@ clausi = "clausi.cli:main"
 [tool.setuptools]
 packages = {find = {}}  # Automatically find all packages
 
+[tool.setuptools.package-data]
+clausi = ["data/regulations/*.yml"]
+
 [tool.setuptools.dynamic]
 version = {attr = "clausi.__version__"}
 

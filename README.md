@@ -1,8 +1,14 @@
 # Clausi CLI
 
-> AI-powered compliance auditing for **EU AI Act**, **GDPR**, **ISO 42001**, **HIPAA**, and **SOC 2**.
+> Free, local AI compliance auditing for **EU AI Act**, **GDPR**, **ISO 42001**, **HIPAA**, and **SOC 2**.
 
-**Version:** 1.0.1 | **Python:** 3.8+ | **License:** MIT
+**Python:** 3.8+ | **License:** MIT
+
+Clausi runs entirely on your machine. Bring your own Anthropic or OpenAI API
+key - file discovery, AI scanning, clause matching, caching, and report
+generation all happen locally. Nothing is uploaded to a Clausi server, and
+there's no account, login, or credits system. You pay your AI provider
+directly for the tokens you use.
 
 ---
 
@@ -13,7 +19,7 @@
 3. [Interactive Mode](#interactive-mode)
 4. [Direct Commands](#direct-commands)
 5. [AI Providers](#ai-providers)
-6. [Pricing](#pricing)
+6. [Local Caching](#local-caching)
 7. [Configuration](#configuration)
 8. [Custom Regulations](#custom-regulations)
 9. [CLI Reference](#cli-reference)
@@ -30,30 +36,26 @@ pip install clausi
 
 Verify installation:
 ```bash
-clausi --version  # Should show: 1.0.1
+clausi --version
 ```
 
 ---
 
 ## Quick Start
 
-### Option 1: Interactive Mode (Recommended)
-
 ```bash
-clausi
-```
+# Set an API key once
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+# or: export OPENAI_API_KEY=sk-your-key-here
 
-This launches a guided wizard with arrow-key navigation. Perfect for first-time users.
-
-### Option 2: Direct Command
-
-```bash
 # Scan current directory against EU AI Act
 clausi scan . -r EU-AIA
 
 # Scan with multiple regulations
 clausi scan . -r EU-AIA -r GDPR
 ```
+
+Or run `clausi` with no arguments for a guided interactive wizard.
 
 ---
 
@@ -68,54 +70,27 @@ Clausi - AI Compliance Auditing
 
 ? What would you like to do?
 → 1. Scan a project for compliance
-  2. Generate documentation
-  3. View remediation guide
-  4. View configuration
-  5. List available AI models
-  6. Run setup wizard
-  7. Show help
-  8. Exit Clausi
+  2. View remediation guide
+  3. View configuration
+  4. List available AI models
+  5. Run setup wizard
+  6. Show help
+  7. Exit Clausi
 ```
-
-### Features
-
-**Main Menu Options:**
-- **Scan a project** - Full scan wizard with step-by-step guidance
-- **Generate documentation** - AI-powered docs generation for your codebase
-- **View remediation guide** - Open previously generated fix suggestions
-- **View configuration** - Display current settings
-- **List AI models** - Show available Claude and OpenAI models
-- **Setup wizard** - Configure API keys and preferences
 
 **Scan Wizard Steps:**
 
-1. **Select project location**
-   - Current directory
-   - Open native file explorer (Windows/Mac/Linux)
-   - Browse directories in terminal
-   - Type path manually
-
-2. **Choose AI provider**
-   - Clausi AI (no API key needed)
-   - Claude BYOK (your Anthropic key)
-   - OpenAI BYOK (your OpenAI key)
-
-3. **Select model** (for BYOK modes)
-   - Claude: claude-sonnet-4, claude-3-5-sonnet, claude-3-5-haiku
-   - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
-
-4. **Choose regulations**
-   - Single regulation (quick select)
-   - Multiple regulations
-   - Custom regulations
-   - Create new custom regulation inline
-
-5. **Select preset** (optional)
-   - Standard scan (all clauses)
-   - Critical-only (faster, cheaper)
-   - High-priority
+1. **Select project location** - current directory, file explorer, or manual path
+2. **Choose AI provider** - Claude (Anthropic key) or OpenAI (OpenAI key)
+3. **Select model** - e.g. claude-3-5-sonnet, gpt-4o
+4. **Choose regulations** - one, several, or a custom regulation
+5. **Select preset** (optional) - all clauses, critical-only, or high-priority
 
 After configuration, the wizard shows the equivalent CLI command and runs the scan.
+
+> `clausi docs generate` (AI-powered docs generation) previously ran through
+> the hosted Clausi backend, which has been retired. A local BYOK version is
+> planned but not built yet.
 
 ---
 
@@ -164,68 +139,51 @@ clausi scan . --open-findings
 # Show summary in terminal
 clausi scan . --show-markdown
 
-# Show cache statistics (cost savings)
+# Show cache hit/miss statistics
 clausi scan . --show-cache-stats
 
-# Choose report format
-clausi scan . --format pdf      # Default
-clausi scan . --format html
-clausi scan . --format json
-clausi scan . --format all      # All formats
+# Skip the local cache for this run
+clausi scan . --no-cache
 ```
+
+Reports are always written as Markdown (`findings.md`, `compliance_report.md`,
+`traceability_matrix.md`) - no PDF/HTML export yet.
 
 ### Other Commands
 
 ```bash
-# Check account balance
-clausi balance
-
 # View/edit configuration
 clausi config show
 clausi config edit
 
-# Setup wizard
+# Setup wizard (saves your API key locally)
 clausi setup
 
 # List available AI models
 clausi models list
 
-# Generate documentation
-clausi docs /path/to/project
-
-# Authenticate
-clausi login
+# Local cache management
+clausi cache stats
+clausi cache clear
 ```
 
 ---
 
 ## AI Providers
 
-Clausi supports three modes of operation:
+Clausi is BYOK-only - pick whichever provider you already have a key for:
 
-### 1. Clausi AI (Default)
-
-No API key required. We handle the AI calls.
-
-```bash
-clausi scan .
-```
-
-### 2. Claude BYOK (Bring Your Own Key)
-
-Use your Anthropic API key:
+### Claude (Anthropic)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
 clausi scan . --claude
 
 # Or specify a model
-clausi scan . --claude claude-sonnet-4-20250514
+clausi scan . --claude claude-3-5-sonnet-20241022
 ```
 
-### 3. OpenAI BYOK
-
-Use your OpenAI API key:
+### OpenAI
 
 ```bash
 export OPENAI_API_KEY=sk-your-key-here
@@ -235,27 +193,27 @@ clausi scan . --openai
 clausi scan . --openai gpt-4o
 ```
 
+If neither `--claude` nor `--openai` is passed, Clausi auto-detects: it uses
+`ANTHROPIC_API_KEY` if set, otherwise `OPENAI_API_KEY`, otherwise it exits
+with instructions for getting a key.
+
+You are billed directly by Anthropic/OpenAI for the tokens used - Clausi
+itself is free and doesn't see your key or your code.
+
 ---
 
-## Pricing
+## Local Caching
 
-### Clausi AI (Hosted)
+Clausi caches scan results on disk at `~/.clausi/cache/`, keyed by file
+content hash + regulation + clause scope + provider + model. Re-running a
+scan on an unchanged file serves the cached result instead of calling the AI
+API again - this is the main lever for keeping repeat scans fast and cheap.
 
-- **Minimum:** $3.00 per scan (covers up to 100k lines of code)
-- **Above 100k LOC:** +$0.40 per additional 100k lines
-- **Maximum:** 200k LOC per scan (use BYOK for larger projects)
-
-### BYOK (Bring Your Own Key)
-
-- **Platform fee:** $0.50 minimum, +$0.10 per 100k LOC above 100k
-- **No size limit** - scan projects of any size
-- **You pay AI costs** directly to Anthropic/OpenAI
-
-### Credits
-
-- 1 credit = $0.10
-- New accounts start with 20 free credits ($2.00 value)
-- Purchase more at https://clausi.ai
+```bash
+clausi cache stats     # show cache directory + entry count
+clausi cache clear     # wipe the cache (forces a full re-scan)
+clausi scan . --no-cache   # bypass the cache for one run
+```
 
 ---
 
@@ -269,15 +227,21 @@ macOS/Linux: ~/.clausi/config.yml
 
 Example configuration:
 ```yaml
-api_token: "cltoken_..."          # Auto-saved after login
+ai:
+  provider: claude
+  model: claude-3-5-sonnet-20241022
 
 api_keys:
   anthropic: "sk-ant-..."         # For --claude mode
   openai: "sk-..."                # For --openai mode
 
-api:
-  url: https://api.clausi.ai
-  timeout: 300
+report:
+  output_dir: clausi/reports
+  company_name: ""
+
+cache:
+  enabled: true
+  ttl_days: 30
 
 ui:
   show_markdown: true             # Show summary after scan
@@ -310,7 +274,6 @@ Create `~/.clausi/custom_regulations/company-security.yml`:
 ```yaml
 name: "Company Security Policy"
 description: "Internal security requirements"
-version: "1.0"
 
 clauses:
   - id: "SEC-001"
@@ -319,7 +282,6 @@ clauses:
     requirements:
       - "Implement multi-factor authentication"
       - "Support TOTP or hardware security keys"
-    severity: "critical"
 
   - id: "SEC-002"
     title: "Data Encryption"
@@ -327,7 +289,6 @@ clauses:
     requirements:
       - "Encrypt data at rest using AES-256"
       - "Use TLS 1.3 for data in transit"
-    severity: "high"
 ```
 
 ### Usage
@@ -339,15 +300,6 @@ clausi scan . -r COMPANY-SECURITY
 # Combine with built-in regulations
 clausi scan . -r EU-AIA -r COMPANY-SECURITY
 ```
-
-### Create via Interactive Mode
-
-The interactive mode can create custom regulations for you:
-
-1. Run `clausi`
-2. Select "Scan a project"
-3. At regulation selection, choose "Create new custom regulation"
-4. Follow the prompts
 
 ---
 
@@ -365,31 +317,30 @@ clausi --help       Show help
 | Command | Description |
 |---------|-------------|
 | `clausi` | Launch interactive mode |
-| `clausi scan PATH` | Run compliance scan |
-| `clausi docs PATH` | Generate documentation |
-| `clausi balance` | Show account balance |
-| `clausi login` | Authenticate with Clausi |
+| `clausi scan PATH` | Run compliance scan (local, BYOK) |
 | `clausi setup` | First-time setup wizard |
 | `clausi config show` | Display configuration |
 | `clausi config edit` | Edit configuration |
 | `clausi models list` | List available AI models |
+| `clausi cache stats` | Show local cache info |
+| `clausi cache clear` | Clear local cache |
 
 ### Scan Options
 
 | Option | Description |
 |--------|-------------|
 | `-r, --regulation TEXT` | Regulation to scan against (can repeat) |
-| `--claude [MODEL]` | Use Claude with your API key |
+| `--claude [MODEL]` | Use Claude with your Anthropic API key |
 | `--openai [MODEL]` | Use OpenAI with your API key |
 | `--preset TEXT` | Use preset: `critical-only`, `high-priority` |
 | `--include TEXT` | Include specific clauses (can repeat) |
 | `--exclude TEXT` | Exclude specific clauses (can repeat) |
-| `--format FORMAT` | Output: `pdf`, `html`, `json`, `all` |
 | `--open-findings` | Auto-open findings.md after scan |
 | `--show-markdown` | Display summary in terminal |
 | `--show-cache-stats` | Show cache hit/miss statistics |
-| `--skip-confirmation` | Skip cost confirmation prompt |
-| `--max-cost FLOAT` | Maximum cost limit in dollars |
+| `--no-cache` | Disable the local cache for this run |
+| `--skip-confirmation, -y` | Skip cost confirmation prompt |
+| `--max-cost FLOAT` | Abort if the rough estimate exceeds this |
 | `--ignore PATTERN` | Ignore files/dirs (can repeat) |
 | `-o, --output PATH` | Output directory |
 | `-v, --verbose` | Verbose output |
@@ -420,13 +371,13 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          clausi scan . -r EU-AIA --claude --skip-confirmation --format html
+          clausi scan . -r EU-AIA --claude --skip-confirmation
 
       - name: Upload Report
         uses: actions/upload-artifact@v4
         with:
           name: compliance-report
-          path: clausi/
+          path: clausi/reports/
 ```
 
 ---
@@ -437,7 +388,6 @@ jobs:
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key for `--claude` mode |
 | `OPENAI_API_KEY` | OpenAI API key for `--openai` mode |
-| `CLAUSI_TUNNEL_BASE` | Override API URL (for local dev) |
 
 Precedence: CLI flag → Environment variable → Config file → Default
 
@@ -471,12 +421,10 @@ clausi scan . --ignore "tests/" --ignore "*.log"
 
 ## Support
 
-- **Website:** https://clausi.ai
-- **Documentation:** https://docs.clausi.ai
 - **GitHub:** https://github.com/earosenfeld/clausi-cli
 
 ---
 
 ## License
 
-MIT License - © Clausi 2025
+MIT License - © Clausi 2026

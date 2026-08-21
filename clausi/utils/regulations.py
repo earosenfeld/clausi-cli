@@ -1,274 +1,119 @@
-"""Dynamic regulation fetching with caching and custom regulation support."""
+"""Local regulation loading (built-in bundled YAML + user custom regulations).
+
+No network calls - built-in regulations ship inside the clausi package
+(clausi/data/regulations/); custom regulations live in
+~/.clausi/custom_regulations/ and <project>/.clausi/regulations/.
+"""
 
 import logging
-import os
-import json
-import time
-import requests
-import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+
 from clausi.utils.console import console
 
 logger = logging.getLogger(__name__)
 
-# Cache and custom regulation paths
-CACHE_FILE = Path.home() / ".clausi" / "regulations_cache.json"
+BUILT_IN_REGULATIONS_DIR = Path(__file__).parent.parent / "data" / "regulations"
 CUSTOM_REGULATIONS_DIR = Path.home() / ".clausi" / "custom_regulations"
-CACHE_TTL = 3600  # 1 hour in seconds
 
-# Fallback regulations if backend is unreachable
-FALLBACK_REGULATIONS = {
-    "EU-AIA": {
-        "name": "EU AI Act",
-        "description": "European Union Artificial Intelligence Act",
-    },
-    "GDPR": {
-        "name": "GDPR",
-        "description": "General Data Protection Regulation",
-    },
-    "ISO-42001": {
-        "name": "ISO 42001",
-        "description": "AI Management System – ISO/IEC 42001:2023",
-    },
-    "HIPAA": {
-        "name": "HIPAA",
-        "description": "Health Insurance Portability and Accountability Act",
-    },
-    "SOC2": {
-        "name": "SOC 2",
-        "description": "System and Organization Controls Type 2",
-    },
+# Maps regulation YAML filename stem -> canonical regulation code.
+_FILENAME_TO_CODE = {
+    "eu_aia": "EU-AIA",
+    "gdpr": "GDPR",
+    "iso_42001": "ISO-42001",
+    "hipaa": "HIPAA",
+    "soc2": "SOC2",
 }
 
+_BUILT_IN_CACHE: Optional[Dict[str, Any]] = None
 
-def _get_cache() -> Optional[Dict[str, Any]]:
-    """Load regulations from cache if valid."""
-    if not CACHE_FILE.exists():
+
+def _regulation_code_for(yaml_path: Path) -> str:
+    stem = yaml_path.stem
+    return _FILENAME_TO_CODE.get(stem, stem.upper().replace("_", "-"))
+
+
+def _load_regulation_file(yaml_path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        console.print(f"[yellow]Warning: Could not load regulation {yaml_path.name}: {e}[/yellow]")
         return None
 
-    try:
-        with open(CACHE_FILE, 'r') as f:
-            cache = json.load(f)
 
-        # Check if cache is still valid
-        if time.time() - cache.get('timestamp', 0) < CACHE_TTL:
-            return cache.get('regulations')
-    except Exception:
-        pass
+def get_regulations() -> Dict[str, Any]:
+    """Get built-in regulations bundled with the CLI (name/description/clauses)."""
+    global _BUILT_IN_CACHE
+    if _BUILT_IN_CACHE is not None:
+        return _BUILT_IN_CACHE
 
-    return None
+    regulations: Dict[str, Any] = {}
+    if BUILT_IN_REGULATIONS_DIR.exists():
+        for yaml_path in sorted(BUILT_IN_REGULATIONS_DIR.glob("*.yml")):
+            data = _load_regulation_file(yaml_path)
+            if not data:
+                continue
+            code = _regulation_code_for(yaml_path)
+            regulations[code] = {
+                "name": data.get("name", code),
+                "description": data.get("description", ""),
+                "clauses": data.get("clauses", []),
+            }
 
-
-def _save_cache(regulations: Dict[str, Any]) -> None:
-    """Save regulations to cache."""
-    try:
-        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CACHE_FILE, 'w') as f:
-            json.dump({
-                'timestamp': time.time(),
-                'regulations': regulations
-            }, f, indent=2)
-    except Exception as e:
-        logger.warning(f"Failed to cache regulation: {e}")
-
-
-def get_regulations(api_url: Optional[str] = None, use_cache: bool = True) -> Dict[str, Any]:
-    """Fetch available regulations from backend with caching.
-
-    Args:
-        api_url: Optional API URL (defaults to environment variable or hardcoded)
-        use_cache: Whether to use cached regulations (default: True)
-
-    Returns:
-        Dictionary of regulations {code: {name, description}}
-    """
-    # Try cache first if enabled - this is instant
-    if use_cache:
-        cached = _get_cache()
-        if cached:
-            return cached
-
-    # No cache - use FALLBACK_REGULATIONS immediately for fast startup
-    # The backend will be called during the actual scan anyway
-    # This ensures CLI startup and menu navigation is instant
-    if use_cache:
-        # Return fallback immediately, try to update cache in background
-        # For now just return fallback - cache will update on next successful API call
-        return FALLBACK_REGULATIONS
-
-    # Explicit cache bypass requested (use_cache=False) - fetch from backend
-    if not api_url:
-        api_url = os.getenv('CLAUSI_TUNNEL_BASE') or "https://api.clausi.ai"
-
-    try:
-        response = requests.get(
-            f"{api_url}/api/clausi/regulations",
-            timeout=2  # Short timeout
-        )
-
-        if response.status_code == 200:
-            regulations_list = response.json()
-
-            # Convert list format to dict format for backward compatibility
-            regulations = {}
-            for reg in regulations_list:
-                regulations[reg['code']] = {
-                    'name': reg['name'],
-                    'description': reg.get('description', '')
-                }
-
-            # Save to cache for future use
-            _save_cache(regulations)
-            return regulations
-
-    except Exception:
-        pass
-
-    # Final fallback
-    return FALLBACK_REGULATIONS
+    _BUILT_IN_CACHE = regulations
+    return regulations
 
 
 def discover_custom_regulations(project_path: Optional[Path] = None) -> Dict[str, Path]:
-    """Discover custom regulation YAML files from user's config directory AND project directory.
+    """Discover custom regulation YAML files (global + project-local)."""
+    custom_regs: Dict[str, Path] = {}
 
-    Args:
-        project_path: Optional path to project directory (will check .clausi/regulations/)
-
-    Returns:
-        Dictionary mapping regulation code to YAML file path
-        Example: {'my-company-policy': Path('~/.clausi/custom_regulations/my-company-policy.yml')}
-    """
-    custom_regs = {}
-
-    # 1. Check global custom regulations directory (~/.clausi/custom_regulations/)
     if CUSTOM_REGULATIONS_DIR.exists():
         for yaml_file in CUSTOM_REGULATIONS_DIR.glob("*.yml"):
-            # Use filename (without extension) as regulation code
             reg_code = yaml_file.stem.upper().replace("_", "-")
             custom_regs[reg_code] = yaml_file
 
-    # 2. Check project-specific custom regulations (.clausi/regulations/)
     if project_path:
-        project_regs_dir = project_path / ".clausi" / "regulations"
+        project_regs_dir = Path(project_path) / ".clausi" / "regulations"
         if project_regs_dir.exists():
             for yaml_file in project_regs_dir.glob("*.yml"):
-                # Use filename (without extension) as regulation code
                 reg_code = yaml_file.stem.upper().replace("_", "-")
-                # Project-specific regulations override global ones
                 custom_regs[reg_code] = yaml_file
 
     return custom_regs
 
 
 def load_custom_regulation(yaml_path: Path) -> Optional[Dict[str, Any]]:
-    """Load a custom regulation YAML file.
-
-    Args:
-        yaml_path: Path to the YAML file
-
-    Returns:
-        Parsed YAML content as dictionary, or None if invalid
-    """
-    try:
-        with open(yaml_path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not load custom regulation {yaml_path.name}: {e}[/yellow]")
+    """Load a custom regulation YAML file (expects name/description/clauses)."""
+    data = _load_regulation_file(yaml_path)
+    if not data or "clauses" not in data:
         return None
+    return data
 
 
 def get_all_regulations() -> Tuple[Dict[str, Any], Dict[str, Path]]:
-    """Get both built-in and custom regulations.
-
-    Returns:
-        Tuple of (built_in_regulations, custom_regulations_paths)
-    """
-    built_in = get_regulations()
-    custom = discover_custom_regulations()
-    return built_in, custom
+    """Get both built-in and custom regulations."""
+    return get_regulations(), discover_custom_regulations()
 
 
-def get_regulation_choices() -> list:
-    """Get list of regulation codes for Click choices (built-in + custom).
-
-    Returns:
-        List of regulation codes (e.g., ['EU-AIA', 'GDPR', 'my-company-policy'])
-    """
+def get_regulation_choices() -> List[str]:
+    """Get list of regulation codes for Click choices (built-in + custom)."""
     built_in, custom = get_all_regulations()
     return list(built_in.keys()) + list(custom.keys())
 
 
-def get_custom_regulations_for_scan(selected_regulations: List[str], project_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Prepare custom regulations to send to backend.
+def get_regulation_clauses(regulation_code: str, project_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Get the full regulation dict ({name, description, clauses}) for a given code,
+    checking built-in regulations first, then custom ones."""
+    built_in = get_regulations()
+    if regulation_code in built_in:
+        return built_in[regulation_code]
 
-    Args:
-        selected_regulations: List of regulation codes selected by user
-        project_path: Optional path to project directory
+    custom_paths = discover_custom_regulations(project_path=project_path)
+    if regulation_code in custom_paths:
+        return load_custom_regulation(custom_paths[regulation_code])
 
-    Returns:
-        List of custom regulation dicts with code and YAML content
-    """
-    custom_regs_paths = discover_custom_regulations(project_path=project_path)
-    custom_regs_data = []
-
-    for reg_code in selected_regulations:
-        if reg_code in custom_regs_paths:
-            yaml_content = load_custom_regulation(custom_regs_paths[reg_code])
-            if yaml_content:
-                custom_regs_data.append({
-                    'code': reg_code,
-                    'content': yaml_content
-                })
-
-    return custom_regs_data
-
-
-def upload_custom_regulations(
-    selected_regulations: List[str],
-    project_path: Path,
-    api_url: str,
-    customer_id: str = "cli_user"
-) -> None:
-    """Upload custom regulations to backend before scanning.
-
-    Args:
-        selected_regulations: List of regulation codes to check
-        project_path: Path to the project being scanned
-        api_url: Backend API URL
-        customer_id: Customer ID for tracking (default: "cli_user")
-    """
-    custom_regs_paths = discover_custom_regulations(project_path=project_path)
-
-    for reg_code in selected_regulations:
-        if reg_code in custom_regs_paths:
-            yaml_path = custom_regs_paths[reg_code]
-
-            # Read YAML content
-            try:
-                with open(yaml_path, 'r') as f:
-                    yaml_content = f.read()
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not read {yaml_path.name}: {e}[/yellow]")
-                continue
-
-            # Upload to backend
-            try:
-                response = requests.post(
-                    f"{api_url}/api/clausi/regulations/custom",
-                    json={
-                        "regulation_id": reg_code,
-                        "yaml_content": yaml_content,
-                        "customer_id": customer_id
-                    },
-                    timeout=10
-                )
-
-                if response.status_code == 200:
-                    console.print(f"[green]✓[/green] Uploaded custom regulation: {reg_code}")
-                else:
-                    error_msg = response.json().get("detail", "Unknown error")
-                    console.print(f"[yellow]Warning: Failed to upload {reg_code}: {error_msg}[/yellow]")
-
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not upload {reg_code}: {e}[/yellow]")
+    return None

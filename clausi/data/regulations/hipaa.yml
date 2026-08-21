@@ -1,0 +1,95 @@
+# HIPAA - Health Insurance Portability and Accountability Act
+# US healthcare data protection
+name: "HIPAA"
+description: "Health Insurance Portability and Accountability Act - US healthcare data protection"
+clauses:
+  - id: "Privacy-Rule-164.502"
+    title: "Uses and Disclosures of Protected Health Information"
+    description: "Permitted and required uses and disclosures of PHI"
+    requirements:
+      - "Limit uses and disclosures to only what is permitted or required by Privacy Rule"
+      - "Use or disclose only minimum necessary PHI to accomplish intended purpose"
+      - "Obtain individual authorization for uses and disclosures not otherwise permitted"
+      - "Document all disclosures of PHI for accounting purposes"
+      - "Implement policies limiting access to PHI to workforce members who need access"
+
+  - id: "Privacy-Rule-164.520"
+    title: "Notice of Privacy Practices"
+    description: "Provide notice of privacy practices to individuals"
+    requirements:
+      - "Maintain notice of privacy practices that describes how PHI may be used and disclosed"
+      - "Include in notice: uses and disclosures permitted by rule, individual rights, covered entity duties"
+      - "Provide notice at first service delivery and make available upon request"
+      - "Post notice in clear and prominent location where services delivered"
+      - "Post notice on website if one is maintained"
+      - "Revise and redistribute notice whenever material change to uses, disclosures or individual rights"
+
+  - id: "Privacy-Rule-164.524"
+    title: "Access to Protected Health Information"
+    description: "Individual right to access PHI"
+    requirements:
+      - "Permit individuals to inspect and obtain copy of PHI in designated record set"
+      - "Respond to access requests within 30 days (or 60 days with one 30-day extension)"
+      - "Provide access in form and format requested if readily producible"
+      - "Provide summary if individual agrees in advance to summary or explanation"
+      - "Document and maintain denials of access including reasons for denial"
+
+  - id: "Security-Rule-164.308"
+    title: "Administrative Safeguards"
+    description: "Administrative actions to manage security measures"
+    requirements:
+      - "Implement security management process to prevent, detect, contain and correct security violations"
+      - "Conduct accurate and thorough risk analysis of potential risks to ePHI"
+      - "Implement risk management measures to reduce risks to reasonable and appropriate level"
+      - "Implement sanction policy for workforce members who violate security policies"
+      - "Implement information system activity review including audit logs, access reports and security incidents"
+      - "Implement security awareness and training program for all workforce members"
+      - "Implement procedures for authorizing access to ePHI"
+      - "Implement workforce clearance procedures ensuring appropriate access authorization"
+      - "Implement procedures for terminating access when employment or authorization ends"
+
+  - id: "Security-Rule-164.310"
+    title: "Physical Safeguards"
+    description: "Physical measures to protect electronic systems and related buildings"
+    requirements:
+      - "Implement facility access controls to limit physical access to electronic information systems"
+      - "Implement policies and procedures to safeguard facility and equipment from unauthorized access, tampering and theft"
+      - "Implement procedures for verifying person seeking access to ePHI has appropriate access authorization"
+      - "Implement workstation use policies that specify proper functions, manner of use and physical attributes"
+      - "Implement physical safeguards for all workstations accessing ePHI to restrict access to authorized users"
+      - "Implement policies and procedures for transfer, removal, disposal and re-use of electronic media"
+
+  - id: "Security-Rule-164.312"
+    title: "Technical Safeguards"
+    description: "Technology and related policies to protect and control access to ePHI"
+    requirements:
+      - "Implement technical policies and procedures for electronic information systems with ePHI to allow access only to authorized persons"
+      - "Implement unique user identification to track user identity"
+      - "Implement emergency access procedures for obtaining ePHI during emergency"
+      - "Implement automatic logoff to terminate electronic session after predetermined time of inactivity"
+      - "Implement encryption and decryption mechanisms to protect ePHI transmitted over electronic networks"
+      - "Implement hardware, software and procedural mechanisms to record and examine activity in information systems"
+      - "Implement procedures to verify person or entity seeking access to ePHI is authorized"
+      - "Implement mechanism to encrypt and decrypt ePHI where appropriate"
+
+  - id: "Security-Rule-164.316"
+    title: "Policies, Procedures and Documentation"
+    description: "Documentation requirements for security compliance"
+    requirements:
+      - "Implement reasonable and appropriate policies and procedures to comply with Security Rule"
+      - "Maintain written (may be electronic) policies and procedures for security standards"
+      - "Document actions, activities or assessments required by Security Rule"
+      - "Retain documentation for 6 years from date of creation or last effective date"
+      - "Make documentation available to workforce members responsible for implementing procedures"
+      - "Review and update documentation periodically in response to environmental or operational changes"
+
+  - id: "Breach-Notification-164.404"
+    title: "Breach Notification to Individuals"
+    description: "Notify individuals of breaches of unsecured PHI"
+    requirements:
+      - "Notify each individual whose unsecured PHI has been breached within 60 days of discovery"
+      - "Include in notification: description of breach, types of information involved, steps individuals should take"
+      - "Include recommended steps to protect from potential harm, brief description of what entity is doing to investigate"
+      - "Provide contact information for individuals to ask questions and receive updates"
+      - "Provide notification by first-class mail or email if individual has agreed to electronic notice"
+      - "For breaches involving 500+ individuals, also notify prominent media outlets and HHS Secretary"

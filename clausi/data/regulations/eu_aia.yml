@@ -1,0 +1,98 @@
+# EU AI Act - European Union Artificial Intelligence Act
+# Harmonized rules for AI systems
+name: "EU AI Act"
+description: "European Union Artificial Intelligence Act - Harmonized rules for AI systems"
+clauses:
+  - id: "Article-9"
+    title: "Risk Management System"
+    description: "Establish, implement, document and maintain a risk management system for high-risk AI systems"
+    requirements:
+      - "Implement continuous iterative risk management throughout AI system lifecycle"
+      - "Identify and analyze known and foreseeable risks associated with each high-risk AI system"
+      - "Estimate and evaluate risks that may emerge when high-risk AI system is used in accordance with its intended purpose"
+      - "Evaluate risks that may emerge from reasonably foreseeable misuse"
+      - "Adopt appropriate risk management measures to address identified risks"
+      - "Conduct risk assessments at least annually and when system changes occur"
+      - "Document all risk management activities and decisions"
+
+  - id: "Article-10"
+    title: "Data and Data Governance"
+    description: "Training, validation and testing data governance and management practices"
+    requirements:
+      - "Ensure training, validation and testing datasets are relevant, representative, free of errors and complete"
+      - "Have appropriate statistical properties including for the persons or groups of persons on whom the AI is intended to be used"
+      - "Take into account characteristics or elements particular to specific geographical, behavioural or functional setting"
+      - "Implement data governance and management practices for training datasets"
+      - "Examine training data for possible biases"
+      - "Detect any possible data gaps or shortcomings and how those gaps can be addressed"
+      - "Document data provenance and data quality metrics"
+
+  - id: "Article-11"
+    title: "Technical Documentation"
+    description: "Maintain up-to-date technical documentation for high-risk AI systems"
+    requirements:
+      - "Draw up technical documentation before placing AI system on market or putting into service"
+      - "Document general description of AI system including intended purpose and provider details"
+      - "Include detailed description of elements of AI system and development process"
+      - "Document detailed information about monitoring, functioning and control of AI system"
+      - "Describe risk management system and any changes made"
+      - "Document validation and testing procedures used"
+      - "Keep technical documentation up-to-date for at least 10 years after system placed on market"
+
+  - id: "Article-12"
+    title: "Record-Keeping and Logging"
+    description: "Automatic recording of events (logs) during AI system operation"
+    requirements:
+      - "Design high-risk AI systems to automatically log events throughout operation"
+      - "Ensure logging capabilities provide level of traceability appropriate to intended purpose"
+      - "Enable logging to facilitate post-market monitoring and investigation of incidents"
+      - "Record period of each use of system"
+      - "Log reference database against which input data has been checked"
+      - "Record input data for which search has led to match"
+      - "Identify natural persons responsible for data verification and decision-making"
+
+  - id: "Article-13"
+    title: "Transparency and Information to Users"
+    description: "Ensure high-risk AI systems are designed to be sufficiently transparent"
+    requirements:
+      - "Enable users to interpret system output and use it appropriately"
+      - "Provide users with appropriate information on AI system capabilities and limitations"
+      - "Include information on level of accuracy, robustness and cybersecurity"
+      - "Inform users about known and foreseeable circumstances which may lead to risks to health, safety or fundamental rights"
+      - "Provide instructions for use in appropriate digital or non-digital format"
+      - "Include concise, complete, correct and clear information that is relevant, accessible and comprehensible"
+
+  - id: "Article-14"
+    title: "Human Oversight"
+    description: "Design high-risk AI systems to enable effective oversight by natural persons"
+    requirements:
+      - "Enable oversight measures to be commensurate with risks, level of autonomy and context of use"
+      - "Ensure humans can fully understand capacities and limitations of AI system"
+      - "Enable humans to remain aware of possible tendency of relying excessively on output (automation bias)"
+      - "Implement ability for humans to correctly interpret AI system output"
+      - "Provide ability for humans to decide not to use AI system or disregard, override or reverse output"
+      - "Enable intervention in operation of AI system or interruption through 'stop' button"
+      - "Ensure oversight can be exercised through measures identified by provider before system placed on market"
+
+  - id: "Article-15"
+    title: "Accuracy, Robustness and Cybersecurity"
+    description: "Ensure high-risk AI systems achieve appropriate levels of performance"
+    requirements:
+      - "Design and develop systems to achieve appropriate level of accuracy, robustness, and cybersecurity"
+      - "Perform consistently throughout lifecycle with respect to these aspects"
+      - "Address technical robustness solutions to minimize and prevent errors, faults and inconsistencies"
+      - "Ensure system is resilient against attempts to alter use or performance by exploiting vulnerabilities"
+      - "Implement measures against attempts by unauthorized third parties to compromise training dataset"
+      - "Ensure accuracy is measured using appropriate metrics and benchmarks"
+      - "Document known limitations in accuracy and expected impact on users"
+
+  - id: "Article-16"
+    title: "Obligations of Providers - Quality Management"
+    description: "Establish quality management system to ensure compliance"
+    requirements:
+      - "Put in place quality management system ensuring compliance with this Regulation"
+      - "Document strategy for regulatory compliance including conformity assessment procedures"
+      - "Implement techniques, procedures and systematic actions for design, control and verification of AI system"
+      - "Establish procedures for data management including data collection, analysis, labeling, storage, aggregation"
+      - "Implement system for post-market monitoring, reporting and corrective actions"
+      - "Document procedures for communication with competent authorities and customers"

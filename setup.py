@@ -69,42 +69,21 @@ class CustomBuildCommand(build_py):
                 print(f"[INFO] Config file already exists, preserving user settings")
                 return True
 
-            config = {
-                "api_key": "",
-                "api": {
-                    "url": "https://api.clausi.ai",
-                    "timeout": 300,
-                    "max_retries": 3
-                },
-                "report": {
-                    "format": "pdf",
-                    "output_dir": "reports",
-                    "company_name": "",
-                    "company_logo": "",
-                    "template": "default"
-                },
-                "regulations": {
-                    "selected": ["EU-AIA", "GDPR", "ISO-42001", "HIPAA", "SOC2"]
-                }
-            }
-            
             print(f"[INFO] Writing config file...")
             # Use simple string formatting instead of yaml
-            config_str = f"""api_key: ""
-api_token: ""
+            config_str = """ai:
+  provider: claude
+  model: claude-3-5-sonnet-20241022
 api_keys:
   openai: ""
   anthropic: ""
-api:
-  url: https://api.clausi.ai
-  timeout: 300
-  max_retries: 3
 report:
-  format: pdf
   output_dir: clausi/reports
   company_name: ""
   company_logo: ""
-  template: default
+cache:
+  enabled: true
+  ttl_days: 30
 regulations:
   selected:
     - EU-AIA
@@ -145,6 +124,8 @@ setup(
         "Support": "https://clausi.ai/contact",
     },
     packages=find_packages(),
+    package_data={"clausi": ["data/regulations/*.yml"]},
+    include_package_data=True,
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
