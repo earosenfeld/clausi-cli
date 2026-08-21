@@ -11,6 +11,7 @@ Usage:
     pytest tests/test_v1_features.py -v
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -337,6 +338,44 @@ class TestShippedRegressions:
 
         for banned in ("temperature", "top_p", "top_k"):
             assert banned not in captured, f"{banned} was sent to messages.create"
+
+    @pytest.mark.parametrize("wrapper,label", [
+        ("{body}", "bare json"),
+        ("```json\n{body}\n```", "fenced with language tag"),
+        ("```\n{body}\n```", "fenced without tag"),
+        ("Here is the analysis:\n\n{body}\n\nLet me know if you need more.", "prose-wrapped"),
+    ])
+    def test_claude_response_parses_into_findings(self, wrapper, label):
+        """Claude has no json_object mode, so it wraps JSON in fences or prose.
+
+        OpenAI is called with response_format=json_object and always returns
+        bare JSON, so the OpenAI path never exercised this. Parsing Claude's
+        text directly turned every wrapped response into an analysis failure.
+        """
+        from clausi.core.ai_provider import ClaudeProvider
+
+        body = json.dumps({"findings": [{
+            "clause_id": "Article-14",
+            "severity": "critical",
+            "explanation": "No human oversight mechanism.",
+            "line_start": 10,
+            "line_end": 15,
+        }]})
+
+        provider = ClaudeProvider.__new__(ClaudeProvider)
+        provider.model = "claude-3-5-sonnet-20241022"
+        provider._client = MagicMock(messages=MagicMock(create=MagicMock(
+            return_value=MagicMock(
+                content=[MagicMock(text=wrapper.format(body=body))],
+                usage=MagicMock(input_tokens=10, output_tokens=20),
+            )
+        )))
+
+        result = provider.analyze_code("EU-AIA", [], "model_service.py", "code")
+
+        assert len(result["findings"]) == 1, f"failed for {label}"
+        assert result["findings"][0]["clause_id"] == "Article-14"
+        assert result["findings"][0]["severity"] == "critical"
 
     def test_openai_never_gets_a_claude_model(self, tmp_path, monkeypatch):
         """A shared ai.model config key must not leak across providers.

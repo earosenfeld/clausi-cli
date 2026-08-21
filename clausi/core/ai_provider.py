@@ -6,6 +6,7 @@ service so cached results and report generation stay compatible.
 """
 
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -88,6 +89,39 @@ def build_prompt(regulation: str, clauses: List[Dict[str, Any]], file_path: str,
     )
 
 
+def extract_json_object(text: str) -> Dict[str, Any]:
+    """Parse a JSON object out of a model response.
+
+    OpenAI is called with response_format=json_object, so its output is always
+    bare JSON. Claude has no equivalent guarantee: despite the prompt asking for
+    JSON only, it commonly wraps the object in ```json fences or prefixes a
+    sentence like "Here is the analysis:". Parsing the raw text directly made
+    every such response an analysis failure.
+    """
+    if text is None:
+        raise ValueError("empty response")
+
+    candidate = text.strip()
+
+    # Strip a fenced block, with or without a language tag.
+    fence = re.match(r"^```[a-zA-Z]*\s*\n(.*?)\n?```$", candidate, re.DOTALL)
+    if fence:
+        candidate = fence.group(1).strip()
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: the outermost {...} span, for prose wrapped around the object.
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(candidate[start:end + 1])
+
+    raise json.JSONDecodeError("no JSON object found in response", candidate, 0)
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token) - no tokenizer dependency needed for BYOK."""
     return max(1, len(text) // 4)
@@ -156,8 +190,8 @@ class ClaudeProvider(AIProvider):
 
         text = response.content[0].text
         try:
-            parsed = json.loads(text)
-        except (json.JSONDecodeError, IndexError) as e:
+            parsed = extract_json_object(text)
+        except (json.JSONDecodeError, IndexError, ValueError) as e:
             raise AIProviderError(f"Could not parse Claude response as JSON: {e}") from e
 
         usage = getattr(response, "usage", None)
@@ -225,8 +259,8 @@ class OpenAIProvider(AIProvider):
 
         text = response.choices[0].message.content
         try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as e:
+            parsed = extract_json_object(text)
+        except (json.JSONDecodeError, ValueError) as e:
             raise AIProviderError(f"Could not parse OpenAI response as JSON: {e}") from e
 
         usage = getattr(response, "usage", None)
