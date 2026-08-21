@@ -49,6 +49,13 @@ def _remap_finding(raw: Dict[str, Any], file_path: str) -> Dict[str, Any]:
     line_end = raw.get("line_end")
     location = f"lines {line_start}-{line_end}" if line_start else "N/A"
 
+    def bounded_score(value):
+        try:
+            score = int(value)
+        except (TypeError, ValueError):
+            return None
+        return score if 1 <= score <= 5 else None
+
     return {
         "clause_id": raw.get("clause_id", ""),
         "violation": True,
@@ -67,6 +74,10 @@ def _remap_finding(raw: Dict[str, Any], file_path: str) -> Dict[str, Any]:
         "responsible_party": raw.get("responsible_party", "Engineering"),
         "why_this_matters": raw.get("why_this_matters", ""),
         "business_impact": raw.get("business_impact", ""),
+        "impact_score": bounded_score(raw.get("impact_score")),
+        "likelihood_score": bounded_score(raw.get("likelihood_score")),
+        "risk_rationale": raw.get("risk_rationale", ""),
+        "verification_criteria": raw.get("verification_criteria", ""),
         "cached": False,
     }
 

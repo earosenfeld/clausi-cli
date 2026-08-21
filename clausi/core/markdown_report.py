@@ -165,6 +165,11 @@ class MarkdownGenerator:
                   f"| Remediation Effort | {effort} |",
                   f"| Cost | ${audit_meta.get('cost', 0):.4f} |", ""]
 
+        changes = audit_meta.get("change_summary") or {}
+        if changes:
+            lines += ["## Change Since Prior Assessment", "", "| New | Changed | Reopened | No Longer Detected | Unchanged |", "|---:|---:|---:|---:|---:|",
+                      f"| {changes.get('new', 0)} | {changes.get('changed', 0)} | {changes.get('reopened', 0)} | {changes.get('resolved', 0)} | {changes.get('unchanged', 0)} |", ""]
+
         if themes:
             lines += ["## Top Risk Themes", ""]
             for t in themes:
@@ -189,12 +194,17 @@ class MarkdownGenerator:
         lines += ["## Detailed Findings", ""]
         sorted_findings = sorted(real, key=calculate_impact_score, reverse=True)
         for i, f in enumerate(sorted_findings, 1):
-            lines.append(f"### {i}. `{f.get('clause_id')}` - {f.get('severity', '').upper()}")
+            lines.append(f"### {i}. `{f.get('finding_id', f'F-{i:03d}')}` - `{f.get('clause_id')}` - {f.get('severity', '').upper()}")
             lines.append("")
             lines.append(f"**File:** `{f.get('file_path')}` ({f.get('location', 'N/A')})  ")
             lines.append(f"**Certainty:** {f.get('finding_certainty')} | "
                           f"**Effort:** {f.get('remediation_complexity')} | "
-                          f"**Owner:** {f.get('responsible_party')}")
+                          f"**Owner:** {f.get('owner') or f.get('responsible_party')} | "
+                          f"**Status:** {f.get('status', 'Open')} | "
+                          f"**Change:** {f.get('change_status', 'new')}")
+            lines.append(f"**Risk:** impact {f.get('impact_score', 'not recorded')}/5, "
+                         f"likelihood {f.get('likelihood_score') or 'not assessed'}/5, "
+                         f"rating {f.get('risk_rating', 'Not scored')}")
             lines.append("")
             if f.get("statement"):
                 lines.append(f"**Clause:** {f['statement']}")

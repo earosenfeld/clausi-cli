@@ -41,10 +41,14 @@ Respond with a JSON object in this exact format:
       "responsible_party": "Engineering|Security|Data|Legal|Product",
       "why_this_matters": "Brief business context for this requirement",
       "business_impact": "Consequence of non-compliance",
+      "impact_score": 4,
+      "likelihood_score": 3,
+      "risk_rationale": "Why the impact and likelihood scores are appropriate",
       "line_start": 10,
       "line_end": 15,
       "code_snippet": "relevant code excerpt",
       "recommendation": "How to fix this",
+      "verification_criteria": "Specific evidence or test that proves the finding is closed",
       "auto_fixable": true,
       "evidence": "Why this is a violation"
     }}
@@ -58,6 +62,10 @@ Rules:
 - Severity: critical (blocking issue), high (legal risk), medium (best practice), low (minor)
 - remediation_complexity: High (architecture change), Medium (moderate refactor), Low (simple code change)
 - responsible_party: Most appropriate team to fix (Engineering, Security, Data, Legal, Product)
+- impact_score: 1 (negligible) to 5 (severe), based on the consequence in this scan scope
+- likelihood_score: 1 (rare) to 5 (almost certain), based only on evidence in the supplied code; omit or null when evidence is insufficient
+- risk_rationale: Explain the evidence behind impact and likelihood without overstating certainty
+- verification_criteria: Define observable, testable closure evidence
 - auto_fixable: true only if fix is simple and safe
 - Provide line numbers if identifiable
 - Be specific and actionable in recommendations

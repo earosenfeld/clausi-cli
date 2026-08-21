@@ -10,13 +10,13 @@ import os
 import sys
 import json
 import shutil
+import shlex
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import click
 import yaml
-import openai
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -31,6 +31,12 @@ from clausi.core.ai_provider import get_ai_provider, estimate_tokens
 from clausi.core.cache import LocalCache
 from clausi.core.markdown_report import MarkdownGenerator
 from clausi.core.pdf_report import PDFReportGenerator
+from clausi.core.finding_lifecycle import (
+    commit_lifecycle,
+    prepare_findings,
+    regulation_pack_hash,
+)
+from clausi.core.remediation_register import save_remediation_register
 from clausi.utils.console import console
 from clausi.utils.output import ensure_output_dir
 from clausi.utils import regulations as regs_module
@@ -105,6 +111,7 @@ def validate_openai_key(key: str) -> bool:
         return False
 
     try:
+        import openai
         openai.OpenAI(api_key=key.strip()).models.list()
         return True
     except Exception as e:
@@ -304,30 +311,44 @@ def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple]
     return clauses_include, clauses_exclude
 
 
-def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> List[dict]:
+def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[List[dict], Dict[str, Any]]:
     """Discover and filter files to analyze."""
     from clausi.utils.output import create_enhanced_progress_bar
 
     with create_enhanced_progress_bar("Scanning project files...") as progress:
         task = progress.add_task("Scanning project files...", total=None)
-        files = scanner.scan_directory(abs_path)
+        discovered_files = scanner.scan_directory(abs_path)
         progress.update(task, completed=True)
 
-    if not files:
+    if not discovered_files:
         console.print("[yellow]No files found to analyze![/yellow]")
         sys.exit(1)
 
-    console.print(f"Found {len(files)} files to analyze")
+    console.print(f"Found {len(discovered_files)} files to analyze")
 
     ignore_list = list(ignore) if ignore else None
-    files = scanner.filter_ignored_files(files, abs_path, ignore_list)
+    files = scanner.filter_ignored_files(discovered_files, abs_path, ignore_list)
 
     if not files:
         console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
         sys.exit(1)
 
     console.print(f"Analyzing {len(files)} files after filtering")
-    return files
+    file_types: Dict[str, int] = {}
+    for file_data in files:
+        extension = str(file_data.get("type") or "unknown").lower()
+        file_types[extension] = file_types.get(extension, 0) + 1
+    ignore_file = scanner.find_clausiignore_file(abs_path)
+    scope_meta = {
+        "files_discovered": len(discovered_files),
+        "files_analyzed": len(files),
+        "files_ignored": len(discovered_files) - len(files),
+        "file_types": dict(sorted(file_types.items())),
+        "total_bytes": sum(int(file_data.get("size") or 0) for file_data in files),
+        "ignore_patterns": list(ignore or ()),
+        "clausiignore": str(ignore_file) if ignore_file else "Not present",
+    }
+    return files, scope_meta
 
 
 @click.group(invoke_without_command=True)
@@ -582,7 +603,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         reg_labels.append(label)
     console.print(f"Regulations: {', '.join(reg_labels)}")
 
-    files = _discover_and_filter_files(abs_path, ignore)
+    files, scope_meta = _discover_and_filter_files(abs_path, ignore)
 
     # Resolve each regulation's clauses locally (bundled YAML + project/custom)
     regulation_data = {}
@@ -645,13 +666,19 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
 
         for f in result["findings"]:
             f["regulation"] = reg_code
-        all_findings.extend(result["findings"])
         total_prompt_tokens += result["token_usage"]["prompt_tokens"]
         total_completion_tokens += result["token_usage"]["completion_tokens"]
         total_cost += result["token_usage"]["cost"]
         all_errors.extend(result.get("errors", []))
 
         reg_output_dir = output_path / reg_code if len(regulations) > 1 else output_path
+        lifecycle = prepare_findings(
+            findings=result["findings"],
+            regulation=reg_code,
+            project_path=Path(abs_path),
+            output_dir=reg_output_dir,
+        )
+        all_findings.extend(result["findings"])
         audit_meta = {
             "timestamp": datetime.utcnow().isoformat(),
             "provider": provider,
@@ -659,6 +686,14 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             "total_tokens": result["token_usage"]["total_tokens"],
             "cost": result["token_usage"]["cost"],
             "files_scanned": len(files),
+            **scope_meta,
+            "clauses_include": clauses_include,
+            "clauses_exclude": clauses_exclude,
+            "scan_command": shlex.join(sys.argv),
+            "change_summary": lifecycle["change_summary"],
+            "resolved_ids": lifecycle["resolved_ids"],
+            "comparison_baseline": lifecycle["is_baseline"],
+            "regulation_pack_sha256": regulation_pack_hash(reg_data),
         }
         MarkdownGenerator().save_all_reports(
             findings=result["findings"],
@@ -680,6 +715,8 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             project_path=Path(abs_path),
             regulation_metadata=reg_data,
         )
+        save_remediation_register(result["findings"], reg_output_dir)
+        commit_lifecycle(lifecycle)
         console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
 
     if all_errors:
@@ -696,6 +733,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         "ai_model": model,
         "clauses_include": clauses_include,
         "clauses_exclude": clauses_exclude,
+        "scope": scope_meta,
         "findings": all_findings,
         "token_usage": {
             "prompt_tokens": total_prompt_tokens,

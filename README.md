@@ -167,15 +167,23 @@ clausi scan . --show-cache-stats
 clausi scan . --no-cache
 ```
 
-Every scan writes four local reports:
+Every scan writes five local customer outputs:
 
 - `report.pdf` - a stakeholder-ready decision brief, action plan, detailed
   evidence cards, and clause traceability matrix
 - `findings.md` - the complete engineering findings
 - `compliance_report.md` - a concise readiness summary
 - `traceability_matrix.md` - clause-to-finding coverage
+- `remediation_register.csv` - an operational owner, due-date, status, ticket,
+  risk, and closure-evidence register for Excel, Sheets, or a GRC import
 
-PDF generation runs locally alongside the scan; it does not use a browser,
+Clausi also writes `scan_snapshot.json` beside the reports and maintains
+`.clausi/remediation.yml` in the scanned project. Finding IDs remain stable
+across report ordering, customer-entered workflow fields survive rescans, and
+the next report classifies findings as new, changed, unchanged, reopened, or
+no longer detected.
+
+PDF and register generation run locally alongside the scan; they do not use a browser,
 Clausi server, or third-party rendering service.
 
 ### Documentation Generation

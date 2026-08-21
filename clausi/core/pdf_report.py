@@ -21,7 +21,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
-    KeepTogether,
     LongTable,
     PageBreak,
     Paragraph,
@@ -109,6 +108,18 @@ class _ClausiCanvas(pdfcanvas.Canvas):
             self.drawRightString(PAGE_WIDTH - RIGHT_MARGIN, 8 * mm, f"PAGE {self._pageNumber}")
             self.restoreState()
         super().showPage()
+
+
+class _ClausiDocTemplate(SimpleDocTemplate):
+    """Add PDF outline entries for marked section headings."""
+
+    def afterFlowable(self, flowable: Any) -> None:
+        outline = getattr(flowable, "_clausi_outline", None)
+        if not outline:
+            return
+        title, key, level = outline
+        self.canv.bookmarkPage(key)
+        self.canv.addOutlineEntry(title, key, level=level, closed=False)
 
 
 def _clean(value: Any) -> str:
@@ -217,6 +228,11 @@ class PDFReportGenerator:
 
     def __init__(self) -> None:
         self.styles = self._build_styles()
+
+    def _section_heading(self, title: str, key: str) -> Paragraph:
+        paragraph = Paragraph(_safe(title), self.styles["h1"])
+        paragraph._clausi_outline = (title, key, 0)
+        return paragraph
 
     def _build_styles(self) -> Dict[str, ParagraphStyle]:
         sample = getSampleStyleSheet()
@@ -337,9 +353,16 @@ class PDFReportGenerator:
         status = _status_copy(readiness)
         generated = _display_timestamp(audit_meta.get("timestamp"))
         provenance = _git_provenance(project_path)
+        recorded_provenance = audit_meta.get("provenance") or {}
+        if isinstance(recorded_provenance, dict):
+            provenance.update({
+                key: _clean(recorded_provenance[key])
+                for key in ("repository", "branch", "commit")
+                if recorded_provenance.get(key)
+            })
         pack_metadata = regulation_metadata or {}
 
-        document = SimpleDocTemplate(
+        document = _ClausiDocTemplate(
             str(output_path),
             pagesize=A4,
             rightMargin=RIGHT_MARGIN,
@@ -412,7 +435,7 @@ class PDFReportGenerator:
 
         story.extend([
             Paragraph("EXECUTIVE DECISION", self.styles["eyebrow"]),
-            Paragraph("Assessment decision brief", self.styles["h1"]),
+            self._section_heading("Assessment decision brief", "executive-decision"),
             Paragraph(
                 "This page answers what was assessed, what requires attention, and what "
                 "management should do next. It is an automated source-code assessment, "
@@ -432,15 +455,15 @@ class PDFReportGenerator:
             self._executive_overview(counts, themes, clause_titles),
             Spacer(1, 5 * mm),
             Paragraph("Management actions", self.styles["h2"]),
-            self._management_actions(readiness),
+            self._management_actions(findings),
             Spacer(1, 4 * mm),
-            self._baseline_note(),
+            self._change_summary(audit_meta),
         ])
 
         story.append(PageBreak())
         story.extend([
             Paragraph("ASSESSMENT BASIS", self.styles["eyebrow"]),
-            Paragraph("Scope, method, and provenance", self.styles["h1"]),
+            self._section_heading("Scope, method, and provenance", "assessment-basis"),
             Paragraph(
                 "These details define the boundary of the result and make the assessment "
                 "reproducible. Items not represented in the scanned source require separate "
@@ -458,19 +481,27 @@ class PDFReportGenerator:
                 audit_meta.get("model"),
                 provenance,
                 pack_metadata,
+                audit_meta,
             ),
             Spacer(1, 7 * mm),
             Paragraph("Assessment limitations", self.styles["h2"]),
             self._limitations_table(),
-            Spacer(1, 6 * mm),
+        ])
+        story.append(PageBreak())
+        story.extend([
+            Paragraph("ASSESSMENT BASIS", self.styles["eyebrow"]),
+            Paragraph("Coverage and scoring definitions", self.styles["h1"]),
             Paragraph("Coverage-state definitions", self.styles["h2"]),
             self._coverage_legend(),
+            Spacer(1, 6 * mm),
+            Paragraph("Risk-rating method", self.styles["h2"]),
+            self._risk_methodology(),
         ])
 
         story.append(PageBreak())
         story.extend([
             Paragraph("REMEDIATION WORKFLOW", self.styles["eyebrow"]),
-            Paragraph("Finding register and action plan", self.styles["h1"]),
+            self._section_heading("Finding register and action plan", "remediation-register"),
             Paragraph(
                 "Findings are ordered by materiality. Status, target date, and ticket fields "
                 "are intentionally explicit so the report can support triage and follow-through.",
@@ -479,7 +510,19 @@ class PDFReportGenerator:
             Spacer(1, 3 * mm),
         ])
         if findings:
-            story.append(self._remediation_register(findings, clause_titles))
+            register_page_size = 6
+            for offset in range(0, len(findings), register_page_size):
+                if offset:
+                    story.extend([
+                        Paragraph("REMEDIATION WORKFLOW", self.styles["eyebrow"]),
+                        Paragraph("Finding register - continued", self.styles["h2"]),
+                        Spacer(1, 2 * mm),
+                    ])
+                story.append(self._remediation_register(
+                    findings[offset:offset + register_page_size], clause_titles
+                ))
+                if offset + register_page_size < len(findings):
+                    story.append(PageBreak())
         else:
             story.append(self._empty_state(
                 "No gaps were flagged",
@@ -490,7 +533,7 @@ class PDFReportGenerator:
         story.append(PageBreak())
         story.extend([
             Paragraph("EVIDENCE APPENDIX", self.styles["eyebrow"]),
-            Paragraph("Detailed findings and verification criteria", self.styles["h1"]),
+            self._section_heading("Detailed findings and verification criteria", "evidence-appendix"),
             Paragraph(
                 "Each record connects a requirement to an observed condition, source evidence, "
                 "recommended treatment, and the evidence needed to close it.",
@@ -500,10 +543,9 @@ class PDFReportGenerator:
         ])
         if findings:
             for index, finding in enumerate(findings, 1):
-                story.append(KeepTogether([
-                    self._finding_card(index, finding, clause_titles),
-                    Spacer(1, 4 * mm),
-                ]))
+                story.append(self._finding_card(index, finding, clause_titles))
+                if index < len(findings):
+                    story.append(PageBreak())
         else:
             story.append(self._empty_state(
                 "No detailed findings",
@@ -514,7 +556,7 @@ class PDFReportGenerator:
             story.append(PageBreak())
             story.extend([
                 Paragraph("CLAUSE COVERAGE", self.styles["eyebrow"]),
-                Paragraph("Traceability matrix", self.styles["h1"]),
+                self._section_heading("Traceability matrix", "traceability-matrix"),
                 Paragraph(
                     "A clause-by-clause index of the automated result. A clause with no "
                     "finding remains subject to human validation and supporting evidence.",
@@ -527,7 +569,7 @@ class PDFReportGenerator:
         story.append(PageBreak())
         story.extend([
             Paragraph("REPORT CONTROL", self.styles["eyebrow"]),
-            Paragraph("Human review and disposition", self.styles["h1"]),
+            self._section_heading("Human review and disposition", "report-control"),
             Paragraph(
                 "The automated result becomes a managed compliance record only after a "
                 "qualified reviewer confirms scope, dispositions the findings, and retains "
@@ -799,45 +841,66 @@ class PDFReportGenerator:
         ]))
         return table
 
-    def _management_actions(self, readiness: Dict[str, Any]) -> Table:
-        first = (
-            "Assign an accountable owner and treatment decision to every critical finding."
-            if readiness["blocking_count"]
-            else "Confirm owners and treatment decisions for every material finding."
-        )
-        actions = [
-            ("01", first),
-            ("02", "Set target dates and link remediation work to tracked tickets."),
-            ("03", "Retest changed controls and retain verification evidence before closure."),
-        ]
-        rows = [
-            [
-                Paragraph(number, self.styles["small_bold"]),
-                Paragraph(_safe(action), self.styles["body"]),
-            ]
-            for number, action in actions
-        ]
-        table = Table(rows, colWidths=[13 * mm, CONTENT_WIDTH - 13 * mm])
+    def _management_actions(self, findings: List[Dict[str, Any]]) -> Table:
+        rows: List[List[Any]] = [[
+            Paragraph("FINDING", self.styles["table_head"]),
+            Paragraph("DECISION REQUIRED", self.styles["table_head"]),
+            Paragraph("OWNER", self.styles["table_head"]),
+            Paragraph("DUE / STATUS", self.styles["table_head"]),
+        ]]
+        for index, finding in enumerate(findings[:5], 1):
+            finding_id = _clean(finding.get("finding_id")) or f"F-{index:03d}"
+            treatment = _clean(
+                finding.get("treatment")
+                or finding.get("recommended_solution")
+                or "Document a treatment decision."
+            )
+            if len(treatment) > 180:
+                treatment = treatment[:177].rstrip() + "..."
+            owner = _clean(finding.get("owner") or finding.get("responsible_party")) or "Unassigned"
+            target = _clean(finding.get("target_date")) or "TBD"
+            status = _clean(finding.get("status")) or "Open"
+            rows.append([
+                Paragraph(f'<link href="#{_safe(finding_id)}" color="{CYAN_DARK.hexval()}"><b>{_safe(finding_id)}</b></link>', self.styles["small"]),
+                Paragraph(_safe(treatment), self.styles["table_cell"]),
+                Paragraph(_safe(owner), self.styles["table_cell"]),
+                Paragraph(f"{_safe(target)}<br/>{_safe(status)}", self.styles["table_cell"]),
+            ])
+        if len(rows) == 1:
+            rows.append([
+                Paragraph("-", self.styles["table_cell"]),
+                Paragraph("Confirm scope and retain supporting evidence.", self.styles["table_cell"]),
+                Paragraph("Compliance", self.styles["table_cell"]),
+                Paragraph("TBD / Open", self.styles["table_cell"]),
+            ])
+        table = Table(rows, colWidths=[31 * mm, CONTENT_WIDTH - 78 * mm, 24 * mm, 23 * mm])
         table.setStyle(TableStyle([
-            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [WHITE, SLATE_50]),
+            ("BACKGROUND", (0, 0), (-1, 0), INK_2),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SLATE_50]),
             ("BOX", (0, 0), (-1, -1), 0.6, SLATE_200),
             ("INNERGRID", (0, 0), (-1, -1), 0.4, SLATE_200),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (0, 0), (0, -1), "CENTER"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         return table
 
-    def _baseline_note(self) -> Table:
+    def _change_summary(self, audit_meta: Dict[str, Any]) -> Table:
+        changes = audit_meta.get("change_summary") or {}
+        baseline = bool(audit_meta.get("comparison_baseline", not changes))
+        if baseline:
+            detail = "Baseline assessment - all current findings are new; future scans will compare against this snapshot."
+        else:
+            detail = (
+                f"{changes.get('new', 0)} new | {changes.get('changed', 0)} changed | "
+                f"{changes.get('reopened', 0)} reopened | {changes.get('resolved', 0)} no longer detected | "
+                f"{changes.get('unchanged', 0)} unchanged"
+            )
         table = Table([[
             Paragraph("CHANGE SINCE PRIOR ASSESSMENT", self.styles["metric_label"]),
-            Paragraph(
-                "Baseline assessment - no prior scan was supplied for comparison.",
-                self.styles["small"],
-            ),
+            Paragraph(_safe(detail), self.styles["small"]),
         ]], colWidths=[55 * mm, CONTENT_WIDTH - 55 * mm])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), SLATE_50),
@@ -949,10 +1012,17 @@ class PDFReportGenerator:
         model: Any,
         provenance: Dict[str, str],
         pack_metadata: Dict[str, Any],
+        audit_meta: Dict[str, Any],
     ) -> Table:
         pack_version = _clean(pack_metadata.get("version")) or "Not recorded"
         effective_date = _clean(pack_metadata.get("effective_date")) or "Not recorded"
         last_updated = _clean(pack_metadata.get("last_updated")) or "Not recorded"
+        file_types = audit_meta.get("file_types") or {}
+        type_summary = ", ".join(f".{key}: {value}" for key, value in file_types.items()) or "Not recorded"
+        total_bytes = audit_meta.get("total_bytes")
+        byte_summary = f"{int(total_bytes):,} bytes" if isinstance(total_bytes, (int, float)) else "Not recorded"
+        pack_hash = _clean(audit_meta.get("regulation_pack_sha256"))
+        pack_hash = pack_hash[:16] + "..." if pack_hash else "Not recorded"
         rows = [
             ("Assessment type", "Automated source-code evidence review"),
             ("Project", project_name),
@@ -961,10 +1031,15 @@ class PDFReportGenerator:
             ("Regulation pack", f"{regulation} - version {pack_version}"),
             ("Pack dates", f"Effective {effective_date}; updated {last_updated}"),
             ("Generated", generated),
-            ("Files analyzed", str(files_scanned)),
+            ("Files discovered / analyzed", f"{audit_meta.get('files_discovered', files_scanned)} / {files_scanned}"),
+            ("Files ignored", str(audit_meta.get("files_ignored", 0))),
+            ("Analyzed file types", type_summary),
+            ("Analyzed source size", byte_summary),
             ("Clauses evaluated", str(clauses_scanned) if clauses_scanned else "Not recorded"),
-            ("Scope boundary", "Files discovered after Clausi ignore and scope rules"),
+            ("Scope boundary", f"{_clean(audit_meta.get('clausiignore')) or 'No .clausiignore'}; CLI patterns: {_clean(audit_meta.get('ignore_patterns')) or 'none'}"),
             ("AI provider / model", f"{_clean(provider) or 'Not recorded'} / {_clean(model) or 'Not recorded'}"),
+            ("Regulation pack SHA-256", pack_hash),
+            ("Reproduction command", _clean(audit_meta.get("scan_command")) or "Not recorded"),
         ]
         data = [
             [Paragraph(_safe(label), self.styles["small_bold"]), Paragraph(_safe(value), self.styles["table_cell"])]
@@ -1050,6 +1125,30 @@ class PDFReportGenerator:
         ]))
         return table
 
+    def _risk_methodology(self) -> Table:
+        rows = [
+            ("Impact (1-5)", "Consequence within the stated scan scope. When the provider omits a score, Clausi shows a severity-derived proxy and labels that basis."),
+            ("Likelihood (1-5)", "Probability supported by source evidence. If evidence is insufficient, likelihood remains blank rather than being invented."),
+            ("Risk score", "Impact x likelihood. 1-5 Low; 6-11 Medium; 12-19 High; 20-25 Critical."),
+            ("Human calibration", "A qualified reviewer must validate scores, record treatment, and approve any risk acceptance."),
+        ]
+        data = [
+            [Paragraph(_safe(label), self.styles["small_bold"]), Paragraph(_safe(body), self.styles["table_cell"])]
+            for label, body in rows
+        ]
+        table = Table(data, colWidths=[39 * mm, CONTENT_WIDTH - 39 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), SLATE_100),
+            ("BOX", (0, 0), (-1, -1), 0.6, SLATE_200),
+            ("INNERGRID", (0, 0), (-1, -1), 0.4, SLATE_200),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return table
+
     def _remediation_register(
         self,
         findings: List[Dict[str, Any]],
@@ -1066,6 +1165,7 @@ class PDFReportGenerator:
         ]]
         for index, finding in enumerate(findings, 1):
             severity = _clean(finding.get("severity", "info")).upper()
+            finding_id = _clean(finding.get("finding_id")) or f"F-{index:03d}"
             clause = _clean(finding.get("clause_id", "Unmapped"))
             title = titles.get(clause) or _clean(finding.get("statement")) or "Requirement"
             condition = _clean(finding.get("explanation") or finding.get("violation"))
@@ -1077,9 +1177,12 @@ class PDFReportGenerator:
             owner = _clean(finding.get("responsible_party")) or "Unassigned"
             target = _clean(finding.get("target_date") or finding.get("due_date")) or "TBD"
             status = _clean(finding.get("status")) or "Open"
+            risk_score = finding.get("risk_score")
+            risk_label = _clean(finding.get("risk_rating")) or "Not scored"
+            change = _clean(finding.get("change_status")) or "new"
             data.append([
-                Paragraph(f"F-{index:03d}", self.styles["table_cell"]),
-                Paragraph(_safe(severity), self.styles["small_bold"]),
+                Paragraph(f'<link href="#{_safe(finding_id)}" color="{CYAN_DARK.hexval()}">{_safe(finding_id)}</link>', self.styles["table_cell"]),
+                Paragraph(f"<b>{_safe(severity)}</b><br/>{_safe(risk_label)}{f' / {risk_score}' if risk_score else ''}<br/>{_safe(change.title())}", self.styles["small"]),
                 Paragraph(f"<b>{_safe(clause)}</b><br/>{_safe(title)}", self.styles["table_cell"]),
                 Paragraph(
                     f"<b>Condition:</b> {_safe(condition)}<br/><b>Plan:</b> {_safe(plan)}",
@@ -1089,7 +1192,7 @@ class PDFReportGenerator:
                 Paragraph(_safe(target), self.styles["table_cell"]),
                 Paragraph(_safe(status), self.styles["table_cell"]),
             ])
-        widths = [14 * mm, 19 * mm, 29 * mm, 59 * mm, 22 * mm, 15 * mm, 16 * mm]
+        widths = [28 * mm, 20 * mm, 27 * mm, 55 * mm, 18 * mm, 13 * mm, 13 * mm]
         table = LongTable(data, repeatRows=1, colWidths=widths)
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), INK_2),
@@ -1137,11 +1240,18 @@ class PDFReportGenerator:
         target = _clean(finding.get("target_date") or finding.get("due_date")) or "TBD"
         finding_status = _clean(finding.get("status")) or "Open"
         ticket = _clean(finding.get("ticket") or finding.get("ticket_id")) or "Not linked"
+        finding_id = _clean(finding.get("finding_id")) or f"F-{index:03d}"
+        change = _clean(finding.get("change_status")) or "new"
+        impact_score = finding.get("impact_score")
+        likelihood_score = finding.get("likelihood_score")
+        risk_score = finding.get("risk_score")
+        risk_rating = _clean(finding.get("risk_rating")) or "Not scored"
+        risk_rationale = _clean(finding.get("risk_rationale")) or "Human calibration required."
 
         header = Table([
             [
                 Paragraph(
-                    f'<font color="{CYAN_DARK.hexval()}"><b>F-{index:03d}</b></font> &nbsp; '
+                    f'<a name="{_safe(finding_id)}"/><font color="{CYAN_DARK.hexval()}"><b>{_safe(finding_id)}</b></font> &nbsp; '
                     f'<b>{_safe(clause)} - {_safe(clause_title)}</b>',
                     self.styles["finding_title"],
                 ),
@@ -1161,13 +1271,20 @@ class PDFReportGenerator:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ]))
 
-        metadata = Table([[
-            Paragraph(f'<b>LOCATION</b><br/>{_safe(self._location(finding))}', self.styles["small"]),
-            Paragraph(f'<b>CONFIDENCE</b><br/>{_safe(certainty)}', self.styles["small"]),
-            Paragraph(f'<b>OWNER</b><br/>{_safe(owner)}', self.styles["small"]),
-            Paragraph(f'<b>TARGET</b><br/>{_safe(target)}', self.styles["small"]),
-            Paragraph(f'<b>STATUS</b><br/>{_safe(finding_status)}', self.styles["small"]),
-        ]], colWidths=[CONTENT_WIDTH * 0.40, CONTENT_WIDTH * 0.15, CONTENT_WIDTH * 0.17, CONTENT_WIDTH * 0.13, CONTENT_WIDTH * 0.15])
+        metadata = Table([
+            [
+                Paragraph(f'<b>LOCATION</b><br/>{_safe(self._location(finding))}', self.styles["small"]),
+                Paragraph(f'<b>CONFIDENCE</b><br/>{_safe(certainty)}', self.styles["small"]),
+                Paragraph(f'<b>CHANGE</b><br/>{_safe(change.title())}', self.styles["small"]),
+                Paragraph(f'<b>RISK</b><br/>{_safe(risk_rating)}{f" / {risk_score}" if risk_score else ""}', self.styles["small"]),
+            ],
+            [
+                Paragraph(f'<b>OWNER</b><br/>{_safe(owner)}', self.styles["small"]),
+                Paragraph(f'<b>TARGET</b><br/>{_safe(target)}', self.styles["small"]),
+                Paragraph(f'<b>STATUS</b><br/>{_safe(finding_status)}', self.styles["small"]),
+                Paragraph(f'<b>TICKET</b><br/>{_safe(ticket)}', self.styles["small"]),
+            ],
+        ], colWidths=[CONTENT_WIDTH * 0.42, CONTENT_WIDTH * 0.18, CONTENT_WIDTH * 0.18, CONTENT_WIDTH * 0.22])
         metadata.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), SLATE_50),
             ("INNERGRID", (0, 0), (-1, -1), 0.4, SLATE_200),
@@ -1198,13 +1315,17 @@ class PDFReportGenerator:
             Paragraph("WHY IT MATTERS", self.styles["eyebrow"]),
             Paragraph(_safe(impact), self.styles["table_cell"]),
             Spacer(1, 2 * mm),
+            Paragraph("RISK BASIS", self.styles["eyebrow"]),
+            Paragraph(
+                f"Impact {_safe(impact_score or 'not recorded')} / 5; likelihood {_safe(likelihood_score or 'not assessed')} / 5. {_safe(risk_rationale)}",
+                self.styles["table_cell"],
+            ),
+            Spacer(1, 2 * mm),
             Paragraph("RECOMMENDED TREATMENT", self.styles["eyebrow"]),
             Paragraph(_safe(recommendation), self.styles["table_cell"]),
             Spacer(1, 2 * mm),
             Paragraph("CLOSURE EVIDENCE", self.styles["eyebrow"]),
             Paragraph(_safe(verification), self.styles["table_cell"]),
-            Spacer(1, 2 * mm),
-            Paragraph(f"<b>Ticket:</b> {_safe(ticket)}", self.styles["small"]),
         ]
         detail = Table([[left, right]], colWidths=[(CONTENT_WIDTH - 18) / 2] * 2)
         detail.setStyle(TableStyle([
@@ -1229,7 +1350,10 @@ class PDFReportGenerator:
 
     def _coverage_table(self, findings: List[Dict[str, Any]], clauses: List[Dict[str, Any]]) -> LongTable:
         grouped: Dict[str, List[Dict[str, Any]]] = {}
-        finding_ids = {id(finding): f"F-{index:03d}" for index, finding in enumerate(findings, 1)}
+        finding_ids = {
+            id(finding): (_clean(finding.get("finding_id")) or f"F-{index:03d}")
+            for index, finding in enumerate(findings, 1)
+        }
         for finding in findings:
             grouped.setdefault(_clean(finding.get("clause_id")), []).append(finding)
         data: List[Any] = [[
@@ -1250,11 +1374,14 @@ class PDFReportGenerator:
                 result = "Gap detected - critical"
             elif worst == 1:
                 result = "Gap detected - high"
-            ids = ", ".join(finding_ids[id(finding)] for finding in clause_findings) or "-"
+            ids = ", ".join(
+                f'<link href="#{_safe(finding_ids[id(finding)])}" color="{CYAN_DARK.hexval()}">{_safe(finding_ids[id(finding)])}</link>'
+                for finding in clause_findings
+            ) or "-"
             data.append([
                 Paragraph(_safe(clause_id), self.styles["table_cell"]),
                 Paragraph(_safe(clause.get("title")), self.styles["table_cell"]),
-                Paragraph(_safe(ids), self.styles["table_cell"]),
+                Paragraph(ids, self.styles["table_cell"]),
                 Paragraph(_safe(result), self.styles["table_cell"]),
             ])
         table = LongTable(
