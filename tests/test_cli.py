@@ -80,18 +80,44 @@ def test_scan_command_local_flow(runner, tmp_path):
     assert (reports_dir / "findings.md").exists()
 
 
-def test_scan_requires_api_key(runner, tmp_path):
-    """With no API key available, scan exits with a helpful error instead of hitting a backend."""
+def test_scan_needs_a_key_or_a_local_agent(runner, tmp_path):
+    """With no key AND no agent CLI installed, scan exits with guidance.
+
+    It must never fall through to a hosted backend - there isn't one.
+    """
     test_dir = tmp_path / "test_project"
     test_dir.mkdir()
     (test_dir / "test.py").write_text("print('hi')")
 
     with patch("clausi.utils.config.get_anthropic_key", return_value=None), \
-         patch("clausi.utils.config.get_openai_key", return_value=None):
+         patch("clausi.utils.config.get_openai_key", return_value=None), \
+         patch("clausi.core.ai_provider.shutil.which", return_value=None):
         result = runner.invoke(cli, ["scan", str(test_dir), "-r", "EU-AIA"])
 
     assert result.exit_code != 0
-    assert "No API key found" in result.output
+    assert "No AI backend found" in result.output
+    # Both routes out of the error should be offered.
+    assert "Claude Code" in result.output
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+def test_scan_falls_back_to_local_agent_when_no_key(runner, tmp_path):
+    """An installed, signed-in agent CLI means no API key is needed at all."""
+    test_dir = tmp_path / "test_project"
+    test_dir.mkdir()
+    (test_dir / "test.py").write_text("print('hi')")
+
+    with patch("clausi.utils.config.get_anthropic_key", return_value=None), \
+         patch("clausi.utils.config.get_openai_key", return_value=None), \
+         patch("clausi.core.ai_provider.shutil.which", return_value="/usr/bin/claude"), \
+         patch("clausi.core.ai_provider.subprocess.run",
+               return_value=MagicMock(returncode=0, stdout='{"findings": []}', stderr="")):
+        result = runner.invoke(cli, [
+            "scan", str(test_dir), "-r", "EU-AIA", "--skip-confirmation",
+        ])
+
+    assert result.exit_code == 0, result.output
+    assert "no API key needed" in result.output
 
 
 def _fake_docs_provider():

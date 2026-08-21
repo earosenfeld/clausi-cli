@@ -120,11 +120,19 @@ def save_audit_metadata(path: Path, metadata: Dict[str, Any]) -> None:
 
 # Helper functions for scan command
 
-def _resolve_provider_and_model(claude_model: Optional[str], openai_model: Optional[str]):
-    """Resolve (provider, model) from flags, falling back to whichever API key is set.
+def _resolve_provider_and_model(claude_model: Optional[str], openai_model: Optional[str],
+                                 claude_code: bool = False, codex: bool = False):
+    """Resolve (provider, model) from flags, falling back to a key or local agent CLI.
 
-    Priority: --claude/--openai flag > ANTHROPIC_API_KEY > OPENAI_API_KEY > error.
+    Priority: explicit flag > ANTHROPIC_API_KEY > OPENAI_API_KEY >
+    a signed-in local agent CLI (Claude Code / Codex) > error.
     """
+    if claude_code:
+        return "claude-code", claude_model or ""
+
+    if codex:
+        return "codex", openai_model or ""
+
     if claude_model is not None:
         model = claude_model if claude_model != "" else config_module.get_ai_model("claude")
         return "claude", model
@@ -139,8 +147,24 @@ def _resolve_provider_and_model(claude_model: Optional[str], openai_model: Optio
     if config_module.get_openai_key():
         return "openai", config_module.get_ai_model("openai")
 
-    console.print(f"\n{emoji('crossmark')} [bold yellow]No API key found[/bold yellow]")
-    console.print("\nClausi is BYOK (bring your own key) - set one of:")
+    # No API key: fall back to an agent CLI the user already has signed in.
+    # This needs no key at all - it rides their existing subscription.
+    from clausi.core.ai_provider import LOCAL_AGENT_PROVIDERS
+    for local_name, local_cls in LOCAL_AGENT_PROVIDERS.items():
+        if local_cls.is_available():
+            console.print(
+                f"[dim]No API key set - using your local {local_cls.friendly_name} "
+                f"installation.[/dim]"
+            )
+            return local_name, ""
+
+    console.print(f"\n{emoji('crossmark')} [bold yellow]No AI backend found[/bold yellow]")
+    console.print("\nClausi runs locally and needs one of these. Either:")
+    console.print("\n[bold]Use a coding agent you already have[/bold] (no API key needed):")
+    console.print("  [cyan]claude[/cyan]  Claude Code   https://claude.com/claude-code")
+    console.print("  [cyan]codex[/cyan]   Codex CLI     https://developers.openai.com/codex")
+    console.print("  Install and sign in to either, then re-run clausi.")
+    console.print("\n[bold]Or bring your own API key:[/bold]")
     console.print("  [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]   (https://console.anthropic.com)")
     console.print("  [cyan]export OPENAI_API_KEY=sk-...[/cyan]          (https://platform.openai.com/api-keys)")
     console.print("\nOr save one permanently:")
@@ -152,6 +176,21 @@ def _resolve_provider_and_model(claude_model: Optional[str], openai_model: Optio
 def _validate_and_get_api_key(provider: str, model: Optional[str] = None) -> str:
     """Validate and return the API key for the given provider, or exit with guidance."""
     model_display = f" ({model})" if model else ""
+
+    from clausi.core.ai_provider import LOCAL_AGENT_PROVIDERS
+    local_cls = LOCAL_AGENT_PROVIDERS.get(provider)
+    if local_cls:
+        # Agent CLIs carry their own credentials - there is no key to validate.
+        if not local_cls.is_available():
+            console.print(f"\n[bold yellow]{local_cls.friendly_name} not found[/bold yellow]")
+            console.print(f"\n{local_cls.install_hint}")
+            sys.exit(1)
+        console.print(
+            f"\n[cyan]Using your local {local_cls.friendly_name}{model_display} "
+            f"- no API key needed[/cyan]"
+        )
+        return ""
+
     console.print(f"\n[cyan]Using {provider.title()}{model_display} with your API key[/cyan]")
 
     if provider == "claude":
@@ -486,6 +525,8 @@ def list_models():
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
 @click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model: --claude claude-3-5-sonnet-20241022)")
 @click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model: --openai gpt-4o)")
+@click.option("--claude-code", is_flag=True, help="Use your local Claude Code CLI - no API key needed")
+@click.option("--codex", is_flag=True, help="Use your local Codex CLI - no API key needed")
 @click.option("--select-clauses", is_flag=True, help="Interactively select clauses to scan")
 @click.option("--include", "include_clauses", multiple=True, help="Include specific clauses (can be given multiple times, e.g. --include EUAIA-3.1)")
 @click.option("--exclude", "exclude_clauses", multiple=True, help="Exclude specific clauses (can be given multiple times)")
@@ -501,12 +542,13 @@ def list_models():
 @click.option("--show-cache-stats/--no-cache-stats", default=None, help="Show/hide cache statistics (default: from config)")
 @click.option("--no-cache", is_flag=True, help="Disable the local result cache for this run")
 def scan(path: str, regulation: Optional[List[str]], output: Optional[str], claude_model: Optional[str],
-          openai_model: Optional[str], select_clauses: bool, include_clauses: Optional[List[str]],
+          openai_model: Optional[str], claude_code: bool, codex: bool,
+          select_clauses: bool, include_clauses: Optional[List[str]],
           exclude_clauses: Optional[List[str]], preset: Optional[str], verbose: bool,
           skip_confirmation: bool, max_cost: Optional[float], show_details: bool, min_severity: str, ignore: Optional[List[str]],
           open_findings: bool, show_markdown: bool, show_cache_stats: Optional[bool], no_cache: bool):
-    """Run a compliance audit on your codebase - fully local, BYOK (main command)."""
-    provider, model = _resolve_provider_and_model(claude_model, openai_model)
+    """Run a compliance audit on your codebase - fully local (main command)."""
+    provider, model = _resolve_provider_and_model(claude_model, openai_model, claude_code, codex)
     api_key = _validate_and_get_api_key(provider, model)
 
     regulations = _get_scan_regulations(regulation)

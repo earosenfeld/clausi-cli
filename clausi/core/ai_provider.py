@@ -7,6 +7,8 @@ service so cached results and report generation stay compatible.
 
 import json
 import re
+import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -297,10 +299,150 @@ class OpenAIProvider(AIProvider):
         }
 
 
+class LocalAgentProvider(AIProvider):
+    """Runs analysis through an agent CLI already installed and signed in.
+
+    No API key: the CLI uses whatever credentials the user has already set up
+    (a Claude Pro/Max subscription, a ChatGPT plan, or its own configured key),
+    so scanning works with nothing to obtain or paste. Cost is reported as zero
+    because Clausi cannot see the user's plan or per-call billing.
+    """
+
+    binary = ""
+    friendly_name = ""
+    install_hint = ""
+    timeout_seconds = 300
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        # api_key is accepted for factory symmetry and deliberately unused.
+        super().__init__(api_key or "", model or "")
+
+    @classmethod
+    def resolve_binary(cls) -> Optional[str]:
+        """Absolute path to the CLI, or None.
+
+        The full path matters on Windows, where these CLIs install as .CMD
+        shims that cannot be executed from a bare name.
+        """
+        return shutil.which(cls.binary)
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return cls.resolve_binary() is not None
+
+    def _command(self, executable: str) -> List[str]:
+        raise NotImplementedError
+
+    def _run(self, prompt: str) -> str:
+        executable = self.resolve_binary()
+        if not executable:
+            raise AIProviderError(
+                f"{self.friendly_name} was not found on your PATH. {self.install_hint}"
+            )
+        try:
+            completed = subprocess.run(
+                self._command(executable),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                # The prompt goes on stdin, never argv: it embeds whole source
+                # files, and Windows caps a command line near 32KB. Keeping it
+                # off argv also means no shell ever parses user code.
+                input=prompt,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.TimeoutExpired as e:
+            raise AIProviderError(
+                f"{self.friendly_name} timed out after {self.timeout_seconds}s"
+            ) from e
+        except OSError as e:
+            raise AIProviderError(f"Could not run {self.friendly_name}: {e}") from e
+
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[:400]
+            raise AIProviderError(
+                f"{self.friendly_name} exited {completed.returncode}: {detail}"
+            )
+
+        output = (completed.stdout or "").strip()
+        if not output:
+            raise AIProviderError(f"{self.friendly_name} returned no output")
+        return output
+
+    def analyze_code(self, regulation, clauses, file_path, code):
+        prompt = build_prompt(regulation, clauses, file_path, code)
+        text = self._run(prompt)
+        try:
+            parsed = extract_json_object(text)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise AIProviderError(
+                f"Could not parse {self.friendly_name} response as JSON: {e}"
+            ) from e
+        return {
+            "findings": parsed.get("findings", []),
+            "prompt_tokens": estimate_tokens(prompt),
+            "completion_tokens": estimate_tokens(text),
+        }
+
+    def estimate_cost(self, input_tokens, output_tokens):
+        # Billed by the user's existing plan, not per-token by us.
+        return 0.0
+
+    def generate_text(self, system_prompt, user_prompt):
+        combined = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        text = self._run(combined)
+        return {
+            "text": text,
+            "prompt_tokens": estimate_tokens(combined),
+            "completion_tokens": estimate_tokens(text),
+        }
+
+
+class ClaudeCodeProvider(LocalAgentProvider):
+    """Uses a locally installed, signed-in Claude Code CLI."""
+
+    name = "claude-code"
+    binary = "claude"
+    friendly_name = "Claude Code"
+    install_hint = "Install it from https://claude.com/claude-code and run `claude` once to sign in."
+
+    def _command(self, executable: str) -> List[str]:
+        cmd = [executable, "-p"]
+        if self.model:
+            cmd += ["--model", self.model]
+        return cmd
+
+
+class CodexProvider(LocalAgentProvider):
+    """Uses a locally installed, signed-in Codex CLI."""
+
+    name = "codex"
+    binary = "codex"
+    friendly_name = "Codex"
+    install_hint = "Install it from https://developers.openai.com/codex and sign in."
+
+    def _command(self, executable: str) -> List[str]:
+        # `codex exec` with no prompt argument reads instructions from stdin.
+        cmd = [executable, "exec"]
+        if self.model:
+            cmd += ["-m", self.model]
+        return cmd
+
+
+LOCAL_AGENT_PROVIDERS = {
+    ClaudeCodeProvider.name: ClaudeCodeProvider,
+    CodexProvider.name: CodexProvider,
+}
+
+
 def get_ai_provider(provider_name: str, api_key: str, model: Optional[str] = None) -> AIProvider:
-    """Instantiate a BYOK provider. provider_name is 'claude' or 'openai'."""
+    """Instantiate a provider: an API-key one, or a local agent CLI."""
     if provider_name == "claude":
         return ClaudeProvider(api_key, model)
     if provider_name == "openai":
         return OpenAIProvider(api_key, model)
+    local = LOCAL_AGENT_PROVIDERS.get(provider_name)
+    if local:
+        return local(api_key, model)
     raise ValueError(f"Unsupported AI provider: {provider_name}")

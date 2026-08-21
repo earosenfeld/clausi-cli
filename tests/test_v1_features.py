@@ -310,6 +310,79 @@ def test_version():
     assert __version__
 
 
+class TestLocalAgentProviders:
+    """Scanning through a locally installed Claude Code / Codex CLI."""
+
+    def test_prompt_goes_on_stdin_not_argv(self):
+        """Prompts embed whole source files.
+
+        Windows caps a command line near 32KB, so a large file passed as an
+        argument would fail; keeping it on stdin also means no shell ever
+        parses user code.
+        """
+        from clausi.core.ai_provider import ClaudeCodeProvider
+
+        provider = ClaudeCodeProvider()
+        big_code = "x = 1\n" * 20000
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["input"] = kwargs.get("input")
+            return MagicMock(returncode=0, stdout='{"findings": []}', stderr="")
+
+        with patch("clausi.core.ai_provider.shutil.which", return_value="/usr/bin/claude"), \
+             patch("clausi.core.ai_provider.subprocess.run", side_effect=fake_run):
+            provider.analyze_code("EU-AIA", [], "big.py", big_code)
+
+        assert big_code in captured["input"], "prompt was not sent on stdin"
+        assert not any(big_code in str(part) for part in captured["cmd"]), \
+            "source code leaked onto the command line"
+
+    def test_uses_resolved_path_for_windows_cmd_shims(self):
+        """On Windows these CLIs are .CMD shims that a bare name cannot exec."""
+        from clausi.core.ai_provider import ClaudeCodeProvider
+
+        resolved = r"C:\Users\x\AppData\Roaming\npm\claude.CMD"
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return MagicMock(returncode=0, stdout='{"findings": []}', stderr="")
+
+        with patch("clausi.core.ai_provider.shutil.which", return_value=resolved), \
+             patch("clausi.core.ai_provider.subprocess.run", side_effect=fake_run):
+            ClaudeCodeProvider().analyze_code("EU-AIA", [], "f.py", "code")
+
+        assert captured["cmd"][0] == resolved
+
+    def test_missing_cli_gives_install_guidance(self):
+        from clausi.core.ai_provider import AIProviderError, CodexProvider
+
+        with patch("clausi.core.ai_provider.shutil.which", return_value=None):
+            with pytest.raises(AIProviderError) as exc:
+                CodexProvider().analyze_code("GDPR", [], "f.py", "code")
+
+        assert "not found" in str(exc.value).lower()
+
+    def test_nonzero_exit_is_an_error_not_an_empty_result(self):
+        """A crashed CLI must never look like a clean scan."""
+        from clausi.core.ai_provider import AIProviderError, ClaudeCodeProvider
+
+        with patch("clausi.core.ai_provider.shutil.which", return_value="/usr/bin/claude"), \
+             patch("clausi.core.ai_provider.subprocess.run",
+                   return_value=MagicMock(returncode=1, stdout="", stderr="not logged in")):
+            with pytest.raises(AIProviderError) as exc:
+                ClaudeCodeProvider().analyze_code("EU-AIA", [], "f.py", "code")
+
+        assert "not logged in" in str(exc.value)
+
+    def test_local_agents_report_zero_cost(self):
+        from clausi.core.ai_provider import ClaudeCodeProvider
+
+        assert ClaudeCodeProvider().estimate_cost(10_000, 5_000) == 0.0
+
+
 class TestShippedRegressions:
     """Bugs that shipped in 1.0.x and must not come back."""
 
