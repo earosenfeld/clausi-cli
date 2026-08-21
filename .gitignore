@@ -167,3 +167,4 @@ CLAUDE/
 
 # Tests (internal)
 tests/
+.mcp.json
