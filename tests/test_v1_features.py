@@ -465,8 +465,12 @@ class TestShippedRegressions:
         assert config_module.get_ai_model("claude") == "claude-3-5-sonnet-20241022"
         assert not config_module.get_ai_model("openai").startswith("claude")
 
-    def test_relative_output_dir_resolves_against_scanned_project(self, tmp_path):
-        """Reports belong to the project scanned, not the current directory."""
+    def test_default_output_dir_resolves_against_scanned_project(self, tmp_path):
+        """The default report location belongs to the project scanned.
+
+        Scanning a repo from elsewhere used to dump reports into whatever
+        directory the user happened to be standing in.
+        """
         from clausi.utils.output import ensure_output_dir
 
         project = tmp_path / "someproject"
@@ -483,6 +487,35 @@ class TestShippedRegressions:
 
         assert project.resolve() in out.resolve().parents
         assert elsewhere.resolve() not in out.resolve().parents
+
+    def test_explicit_output_flag_is_relative_to_cwd(self, tmp_path):
+        """-o is a path the user typed, so it anchors where they are standing.
+
+        Anchoring it to the scanned project instead buried reports inside the
+        tree being audited, which is not what anyone types `-o out` expecting.
+        """
+        project = tmp_path / "someproject"
+        project.mkdir()
+        (project / "a.py").write_text("print('x')")
+        elsewhere = tmp_path / "cwd"
+        elsewhere.mkdir()
+
+        runner = CliRunner()
+        cwd = os.getcwd()
+        os.chdir(elsewhere)
+        try:
+            with patch("clausi.cli.get_ai_provider", return_value=_fake_provider()), \
+                 patch("clausi.utils.config.get_anthropic_key", return_value="sk-ant-test-key"):
+                result = runner.invoke(cli, [
+                    "scan", str(project), "-r", "EU-AIA", "--claude",
+                    "--skip-confirmation", "-o", "myreports",
+                ])
+        finally:
+            os.chdir(cwd)
+
+        assert result.exit_code == 0, result.output
+        assert (elsewhere / "myreports").exists(), "explicit -o did not land in cwd"
+        assert not (project / "myreports").exists(), "explicit -o leaked into scanned project"
 
 
 if __name__ == "__main__":

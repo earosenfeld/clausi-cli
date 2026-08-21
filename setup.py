@@ -152,6 +152,7 @@ setup(
         "pathspec>=0.10.0",
         "textual>=0.47.0",  # TUI framework
         "questionary>=2.0.0",  # Arrow key menu navigation
+        "reportlab>=3.6.0",  # Local PDF report generation
     ],
     entry_points={
         "console_scripts": [
@@ -163,4 +164,4 @@ setup(
         'build_py': CustomBuildCommand,
         'post_uninstall': PostUninstallCommand,
     },
-) 
+)

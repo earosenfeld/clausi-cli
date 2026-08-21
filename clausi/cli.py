@@ -30,6 +30,7 @@ from clausi.core import compliance_analyzer
 from clausi.core.ai_provider import get_ai_provider, estimate_tokens
 from clausi.core.cache import LocalCache
 from clausi.core.markdown_report import MarkdownGenerator
+from clausi.core.pdf_report import PDFReportGenerator
 from clausi.utils.console import console
 from clausi.utils.output import ensure_output_dir
 from clausi.utils import regulations as regs_module
@@ -558,10 +559,17 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
 
     abs_path = os.path.abspath(path)
 
-    if not output:
+    if output:
+        # An explicit -o is relative to where the user is standing, like any
+        # other CLI path argument - not to the project being scanned.
+        output_path = Path(output).expanduser().resolve()
+        output_path.mkdir(parents=True, exist_ok=True)
+    else:
+        # The default lives with the project, so scanning a repo from elsewhere
+        # still leaves its reports alongside the code they describe.
         cfg = load_config()
-        output = cfg.get("report", {}).get("output_dir", "clausi/reports") if cfg else "clausi/reports"
-    output_path = ensure_output_dir(abs_path, output)
+        default_dir = (cfg.get("report", {}).get("output_dir") if cfg else None) or "clausi/reports"
+        output_path = ensure_output_dir(abs_path, default_dir)
 
     console.print(f"[bold]Starting compliance scan for {abs_path}[/bold]")
     reg_labels = []
@@ -660,6 +668,17 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             all_clauses=reg_data["clauses"],
             output_dir=reg_output_dir,
             files_scanned=len(files),
+        )
+        PDFReportGenerator().save_report(
+            findings=result["findings"],
+            project_name=Path(abs_path).name,
+            regulation=reg_data["name"],
+            audit_meta=audit_meta,
+            output_dir=reg_output_dir,
+            files_scanned=len(files),
+            all_clauses=reg_data["clauses"],
+            project_path=Path(abs_path),
+            regulation_metadata=reg_data,
         )
         console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
 

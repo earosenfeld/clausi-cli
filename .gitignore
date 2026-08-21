@@ -166,3 +166,6 @@ CLAUDE/
 .claude/
 
 .mcp.json
+
+# Codex session config (machine-local, mirrors how .claude/ is treated)
+.codex/

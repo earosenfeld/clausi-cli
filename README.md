@@ -167,8 +167,16 @@ clausi scan . --show-cache-stats
 clausi scan . --no-cache
 ```
 
-Reports are always written as Markdown (`findings.md`, `compliance_report.md`,
-`traceability_matrix.md`) - no PDF/HTML export yet.
+Every scan writes four local reports:
+
+- `report.pdf` - a stakeholder-ready decision brief, action plan, detailed
+  evidence cards, and clause traceability matrix
+- `findings.md` - the complete engineering findings
+- `compliance_report.md` - a concise readiness summary
+- `traceability_matrix.md` - clause-to-finding coverage
+
+PDF generation runs locally alongside the scan; it does not use a browser,
+Clausi server, or third-party rendering service.
 
 ### Documentation Generation
 

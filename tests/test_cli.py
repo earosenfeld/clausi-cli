@@ -78,6 +78,8 @@ def test_scan_command_local_flow(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert "Article-9" in result.output
     assert (reports_dir / "findings.md").exists()
+    assert (reports_dir / "report.pdf").exists()
+    assert (reports_dir / "report.pdf").stat().st_size > 5_000
 
 
 def test_scan_needs_a_key_or_a_local_agent(runner, tmp_path):

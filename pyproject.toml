@@ -39,6 +39,7 @@ dependencies = [
     "pathspec>=0.10.0",
     "textual>=0.47.0",
     "questionary>=2.0.0",
+    "reportlab>=3.6.0",
 ]
 
 [project.urls]
@@ -73,4 +74,4 @@ ignore = []
 known-first-party = ["clausi"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "ruff>=0.1.0", "black>=23.0.0", "mypy>=1.0.0"] 
+dev = ["pytest>=7.0.0", "ruff>=0.1.0", "black>=23.0.0", "mypy>=1.0.0"]
