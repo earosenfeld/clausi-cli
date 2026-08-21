@@ -664,6 +664,18 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             )
 
         console.print(table)
+    elif all_errors:
+        # Never report "compliant" when files failed to analyze - an absence of
+        # findings caused by errors is not evidence of compliance, and for a
+        # compliance tool that mistake is worse than crashing.
+        console.print(
+            f"\n[red]{emoji('crossmark')} Scan incomplete: "
+            f"{len(all_errors)} of {len(files)} file(s) could not be analyzed.[/red]"
+        )
+        console.print(
+            "[yellow]No findings were produced for those files. This is NOT a "
+            "clean result - re-run after resolving the errors above.[/yellow]"
+        )
     else:
         console.print(f"\n[green]{emoji('checkmark')} No findings - looks compliant![/green]")
 
@@ -675,6 +687,15 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         stats = cache.stats()
         stats["cost_saved"] = 0.0  # exact $ saved is provider/model-dependent; hit-rate is the useful signal
         display_cache_statistics(stats)
+
+    if all_errors and len(all_errors) >= len(files):
+        # Every file failed: nothing was actually analyzed. Exit non-zero so CI
+        # and scripts don't read a broken scan as a passing one.
+        console.print(
+            f"\n[red]Scan failed: no files could be analyzed. "
+            f"Reports in {output_path} are empty and must not be treated as evidence.[/red]"
+        )
+        raise SystemExit(2)
 
     console.print(f"\n[green]Scan completed! Reports saved to {output_path}[/green]")
 

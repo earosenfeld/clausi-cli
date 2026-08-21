@@ -81,17 +81,40 @@ def get_ai_provider() -> str:
     return "claude" if get_anthropic_key() else "openai"
 
 
+DEFAULT_MODELS = {
+    "claude": "claude-3-5-sonnet-20241022",
+    "openai": "gpt-4o",
+}
+
+
+def _model_belongs_to(model: str, provider: str) -> bool:
+    """Whether a configured model name is plausibly for the given provider.
+
+    `ai.model` is a single shared config key, so a user who configured Claude
+    and then ran --openai used to send a Claude model name to OpenAI and get a
+    confusing 404. Claude model IDs are the only ones we can identify by name,
+    so gate on that and let anything else through to OpenAI.
+    """
+    is_claude_name = model.startswith("claude")
+    return is_claude_name if provider == "claude" else not is_claude_name
+
+
 def get_ai_model(provider: Optional[str] = None) -> str:
     """Get AI model for given provider from config."""
     if not provider:
         provider = get_ai_provider()
 
-    config = load_config()
-    if config:
-        model = config.get("ai", {}).get("model")
-        if model:
-            return model
+    config = load_config() or {}
+    ai_config = config.get("ai", {}) or {}
 
-    if provider == "claude":
-        return "claude-3-5-sonnet-20241022"
-    return "gpt-4o"
+    # Per-provider config wins: ai.models.{provider}
+    per_provider = (ai_config.get("models") or {}).get(provider)
+    if per_provider:
+        return per_provider
+
+    # Legacy shared key, honoured only when it matches the requested provider.
+    model = ai_config.get("model")
+    if model and _model_belongs_to(model, provider):
+        return model
+
+    return DEFAULT_MODELS.get(provider, DEFAULT_MODELS["openai"])

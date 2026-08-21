@@ -144,10 +144,11 @@ class ClaudeProvider(AIProvider):
     def analyze_code(self, regulation, clauses, file_path, code):
         prompt = build_prompt(regulation, clauses, file_path, code)
         try:
+            # No temperature: the Anthropic SDK removed sampling parameters from
+            # messages.create() in 1.0, and current models reject them with a 400.
             response = self._client.messages.create(
                 model=self.model,
                 max_tokens=4096,
-                temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
             )
         except Exception as e:
@@ -175,7 +176,6 @@ class ClaudeProvider(AIProvider):
             response = self._client.messages.create(
                 model=self.model,
                 max_tokens=8192,
-                temperature=0.2,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )

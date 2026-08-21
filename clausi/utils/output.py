@@ -15,18 +15,29 @@ from clausi.utils.console import console
 def ensure_output_dir(path: str, output_dir: Optional[str] = None) -> Path:
     """Ensure output directory exists and return its path.
 
+    Reports belong with the project that was scanned, so a relative output
+    directory resolves against `path`, not the current working directory.
+    Scanning a repo from somewhere else used to dump reports wherever the
+    user happened to be standing.
+
     Args:
-        path: Project path (unused but kept for compatibility)
-        output_dir: Optional custom output directory path
+        path: Project path being scanned; relative output dirs resolve here
+        output_dir: Optional custom output directory (absolute or relative)
 
     Returns:
         Path to the output directory
     """
+    project_root = Path(path).resolve()
+    if project_root.is_file():
+        project_root = project_root.parent
+
     if output_dir:
-        output_path = Path(output_dir)
+        candidate = Path(output_dir)
+        # Absolute paths are honoured as-is; relative ones live in the project.
+        output_path = candidate if candidate.is_absolute() else project_root / candidate
     else:
-        # Default to clausi/reports directory to avoid conflicts with existing project reports/
-        output_path = Path.cwd() / "clausi" / "reports"
+        # Default to clausi/reports to avoid conflicts with an existing reports/
+        output_path = project_root / "clausi" / "reports"
     output_path.mkdir(parents=True, exist_ok=True)
     return output_path
 
