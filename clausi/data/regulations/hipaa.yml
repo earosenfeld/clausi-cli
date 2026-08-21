@@ -2,6 +2,9 @@
 # US healthcare data protection
 name: "HIPAA"
 description: "Health Insurance Portability and Accountability Act - US healthcare data protection"
+version: "1.0"
+effective_date: "2013-03-26"
+last_updated: "2026-08-20"
 clauses:
   - id: "Privacy-Rule-164.502"
     title: "Uses and Disclosures of Protected Health Information"

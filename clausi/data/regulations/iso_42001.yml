@@ -2,6 +2,9 @@
 # International standard for AI governance
 name: "ISO/IEC 42001:2023"
 description: "AI Management System Standard - International standard for AI governance"
+version: "1.0"
+effective_date: "2023-12-18"
+last_updated: "2026-08-20"
 clauses:
   - id: "Clause-4"
     title: "Context of the Organization"

@@ -2,6 +2,9 @@
 # EU data protection and privacy regulation
 name: "GDPR"
 description: "General Data Protection Regulation - EU data protection and privacy regulation"
+version: "1.0"
+effective_date: "2018-05-25"
+last_updated: "2026-08-20"
 clauses:
   - id: "Article-5"
     title: "Principles Relating to Processing of Personal Data"

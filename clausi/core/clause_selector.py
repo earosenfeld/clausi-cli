@@ -5,92 +5,90 @@ from rich.table import Table
 from rich.prompt import Prompt
 from clausi.utils.console import console
 
-# Predefined clause presets for quick scoping
+# Predefined clause presets for quick scoping.
+# IDs here must match the "id:" field in clausi/data/regulations/*.yml exactly -
+# they're matched by simple string equality (clausi/core/compliance_analyzer.py),
+# not fuzzy-matched, so a typo or stale ID here silently scans zero clauses.
 CLAUSE_PRESETS = {
     "EU-AIA": {
         "critical-only": [
-            "EUAIA-3.1",  # Risk assessment
-            "EUAIA-5.2",  # High-risk AI system requirements
-            "EUAIA-7.2",  # Transparency obligations
-            "EUAIA-9.1",  # Risk management system
+            "Article-9",   # Risk Management System
+            "Article-13",  # Transparency and Information to Users
+            "Article-14",  # Human Oversight
         ],
         "high-priority": [
-            "EUAIA-3.1",
-            "EUAIA-5.2",
-            "EUAIA-7.2",
-            "EUAIA-9.1",
-            "EUAIA-10.2",  # Data governance
-            "EUAIA-12.1",  # Record keeping
-            "EUAIA-13.1",  # Human oversight
+            "Article-9",
+            "Article-10",  # Data and Data Governance
+            "Article-13",
+            "Article-14",
+            "Article-15",  # Accuracy, Robustness and Cybersecurity
         ],
         "documentation": [
-            "EUAIA-7.2",   # Transparency
-            "EUAIA-11.1",  # Technical documentation
-            "EUAIA-12.1",  # Record keeping
-            "EUAIA-13.3",  # Instructions for use
+            "Article-11",  # Technical Documentation
+            "Article-12",  # Record-Keeping and Logging
+            "Article-13",
         ]
     },
     "GDPR": {
         "critical-only": [
-            "GDPR-5.1",    # Data minimization
-            "GDPR-32.1",   # Security of processing
-            "GDPR-33.1",   # Breach notification
+            "Article-5",     # Principles Relating to Processing of Personal Data
+            "Article-32",    # Security of Processing
+            "Article-33-34", # Personal Data Breach Notification
         ],
         "high-priority": [
-            "GDPR-5.1",
-            "GDPR-6.1",    # Lawfulness of processing
-            "GDPR-25.1",   # Data protection by design
-            "GDPR-32.1",
-            "GDPR-35.1",   # Data protection impact assessment
+            "Article-5",
+            "Article-6",   # Lawfulness of Processing
+            "Article-25",  # Data Protection by Design and by Default
+            "Article-32",
+            "Article-35",  # Data Protection Impact Assessment (DPIA)
         ],
         "data-handling": [
-            "GDPR-5.1",
-            "GDPR-6.1",
-            "GDPR-7.1",    # Consent
-            "GDPR-15.1",   # Right of access
-            "GDPR-17.1",   # Right to erasure
+            "Article-5",
+            "Article-6",
+            "Article-7",      # Conditions for Consent
+            "Article-15-22",  # Data Subject Rights
         ]
     },
     "ISO-42001": {
         "critical-only": [
-            "ISO42001-4.1",   # Context of organization
-            "ISO42001-5.1",   # Leadership
-            "ISO42001-6.1",   # Planning
+            "Clause-4",  # Context of the Organization
+            "Clause-5",  # Leadership and Organizational Commitment
+            "Clause-6",  # Planning and Risk Assessment
         ],
         "high-priority": [
-            "ISO42001-4.1",
-            "ISO42001-5.1",
-            "ISO42001-6.1",
-            "ISO42001-7.1",   # Support
-            "ISO42001-8.1",   # Operation
+            "Clause-4",
+            "Clause-5",
+            "Clause-6",
+            "Clause-8.1",  # Operational Planning and Control
+            "Clause-8.2",  # AI System Lifecycle Management
         ]
     },
     "HIPAA": {
         "critical-only": [
-            "HIPAA-164.308", # Administrative safeguards
-            "HIPAA-164.310", # Physical safeguards
-            "HIPAA-164.312", # Technical safeguards
+            "Security-Rule-164.308",  # Administrative Safeguards
+            "Security-Rule-164.310",  # Physical Safeguards
+            "Security-Rule-164.312",  # Technical Safeguards
         ],
         "high-priority": [
-            "HIPAA-164.308",
-            "HIPAA-164.310",
-            "HIPAA-164.312",
-            "HIPAA-164.314", # Organizational requirements
-            "HIPAA-164.316", # Policies and procedures
+            "Security-Rule-164.308",
+            "Security-Rule-164.310",
+            "Security-Rule-164.312",
+            "Security-Rule-164.316",   # Policies, Procedures and Documentation
+            "Breach-Notification-164.404",  # Breach Notification to Individuals
         ]
     },
     "SOC2": {
         "critical-only": [
-            "SOC2-CC6.1",  # Logical and physical access
-            "SOC2-CC7.1",  # System operations
-            "SOC2-CC7.2",  # Change management
+            "CC6-Logical-Access",     # Logical and Physical Access Controls
+            "CC7-System-Operations",  # System Operations
+            "CC8-Change-Management",  # Change Management
         ],
         "high-priority": [
-            "SOC2-CC6.1",
-            "SOC2-CC6.6",  # Encryption
-            "SOC2-CC7.1",
-            "SOC2-CC7.2",
-            "SOC2-CC8.1",  # Risk assessment
+            "CC6-Logical-Access",
+            "CC7-System-Operations",
+            "CC8-Change-Management",
+            "CC9-Risk-Mitigation",  # Risk Mitigation
+            "CC3-Risk-Assessment",  # Risk Assessment Process
         ]
     }
 }

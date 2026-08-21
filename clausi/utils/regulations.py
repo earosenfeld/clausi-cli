@@ -60,6 +60,9 @@ def get_regulations() -> Dict[str, Any]:
             regulations[code] = {
                 "name": data.get("name", code),
                 "description": data.get("description", ""),
+                "version": data.get("version", ""),
+                "effective_date": data.get("effective_date", ""),
+                "last_updated": data.get("last_updated", ""),
                 "clauses": data.get("clauses", []),
             }
 

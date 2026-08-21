@@ -522,8 +522,15 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     output_path = ensure_output_dir(abs_path, output)
 
     console.print(f"[bold]Starting compliance scan for {abs_path}[/bold]")
-    reg_names = ", ".join(get_regulations().get(r, {}).get("name", r) for r in regulations)
-    console.print(f"Regulations: {reg_names}")
+    reg_labels = []
+    for r in regulations:
+        reg_data = get_regulations().get(r, {})
+        label = reg_data.get("name", r)
+        version = reg_data.get("version")
+        if version:
+            label += f" (v{version})"
+        reg_labels.append(label)
+    console.print(f"Regulations: {', '.join(reg_labels)}")
 
     files = _discover_and_filter_files(abs_path, ignore)
 

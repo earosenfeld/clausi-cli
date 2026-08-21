@@ -1,14 +1,35 @@
 # Clausi CLI
 
+> **The compliance scanner that never sees your code.**
+>
 > Free, local AI compliance auditing for **EU AI Act**, **GDPR**, **ISO 42001**, **HIPAA**, and **SOC 2**.
 
 **Python:** 3.8+ | **License:** MIT
 
-Clausi runs entirely on your machine. Bring your own Anthropic or OpenAI API
-key - file discovery, AI scanning, clause matching, caching, and report
-generation all happen locally. Nothing is uploaded to a Clausi server, and
-there's no account, login, or credits system. You pay your AI provider
-directly for the tokens you use.
+## Your code never leaves your machine to reach Clausi
+
+Clausi runs entirely on your machine: file discovery, clause matching,
+caching, and report generation all happen locally. There is no Clausi
+server in the scan path, no account, no login, and no credits system.
+We never receive, store, or process your source code - it is architecturally
+impossible, because there's no backend for it to go to.
+
+**What does leave your machine:** to run the AI analysis, Clausi sends
+relevant code snippets to the AI provider *you* choose - your own
+Anthropic (`api.anthropic.com`) or OpenAI (`api.openai.com`) account, under
+your own API key. You're billed directly by that provider, not by us. That
+is a materially different trust boundary than sending your code to Clausi:
+you already have a vendor relationship and a DPA with Anthropic or OpenAI,
+you control the account, and you can revoke the key at any time. Clausi
+itself is simply never in that data path.
+
+**Why this matters if you're evaluating Clausi for a regulated org:** every
+hosted compliance-scanning competitor requires shipping your source to a
+third-party server, which typically triggers a vendor security review, a
+new DPA, a data-residency assessment, and legal sign-off before anyone on
+your team can run a scan. Because Clausi has no backend in the scan path,
+none of that applies to Clausi itself - the only third party in scope is
+the AI provider you already use.
 
 ---
 
@@ -19,12 +40,13 @@ directly for the tokens you use.
 3. [Interactive Mode](#interactive-mode)
 4. [Direct Commands](#direct-commands)
 5. [AI Providers](#ai-providers)
-6. [Local Caching](#local-caching)
-7. [Configuration](#configuration)
-8. [Custom Regulations](#custom-regulations)
-9. [CLI Reference](#cli-reference)
-10. [GitHub Actions](#github-actions)
-11. [License](#license)
+6. [Regulation Packs](#regulation-packs)
+7. [Local Caching](#local-caching)
+8. [Configuration](#configuration)
+9. [Custom Regulations](#custom-regulations)
+10. [CLI Reference](#cli-reference)
+11. [GitHub Actions](#github-actions)
+12. [License](#license)
 
 ---
 
@@ -116,7 +138,7 @@ clausi scan . -r EU-AIA -r GDPR -r HIPAA
 Reduce scan time and cost by focusing on specific clauses:
 
 ```bash
-# Only critical clauses (60-80% cost reduction)
+# Only critical clauses (roughly 60-85% fewer clauses scanned, regulation-dependent)
 clausi scan . --preset critical-only
 
 # Only high-priority clauses
@@ -212,8 +234,31 @@ If neither `--claude` nor `--openai` is passed, Clausi auto-detects: it uses
 `ANTHROPIC_API_KEY` if set, otherwise `OPENAI_API_KEY`, otherwise it exits
 with instructions for getting a key.
 
-You are billed directly by Anthropic/OpenAI for the tokens used - Clausi
-itself is free and doesn't see your key or your code.
+You are billed directly by Anthropic/OpenAI for the tokens used. Clausi
+itself is free, has no backend in the scan path, and never sees your key
+or your code - only the AI provider you chose does, under your own account.
+
+---
+
+## Regulation Packs
+
+Clausi ships five built-in regulation packs, bundled as local YAML - no
+network fetch, no version drift between what you scan against and what's
+on disk:
+
+| Regulation | Code | Effective date |
+|------------|------|-----------------|
+| EU AI Act | `EU-AIA` | 2024-08-01 |
+| GDPR | `GDPR` | 2018-05-25 |
+| ISO/IEC 42001:2023 | `ISO-42001` | 2023-12-18 |
+| HIPAA | `HIPAA` | 2013-03-26 |
+| SOC 2 | `SOC2` | 2022-01-01 |
+
+Each pack is versioned (`version:` + `effective_date:` in the YAML) so a
+scan report can always say exactly which revision of a regulation it was
+checked against. `clausi scan` prints the pack version alongside each
+regulation name. As frameworks are amended, packs get dated updates rather
+than silent edits.
 
 ---
 

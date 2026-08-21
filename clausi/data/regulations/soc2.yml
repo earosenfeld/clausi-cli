@@ -2,6 +2,9 @@
 # Trust Services Criteria for service providers
 name: "SOC 2"
 description: "Service Organization Control 2 - Trust Services Criteria for service providers"
+version: "1.0"
+effective_date: "2022-01-01"
+last_updated: "2026-08-20"
 clauses:
   - id: "CC1-Common-Criteria-1"
     title: "Control Environment"
