@@ -116,6 +116,13 @@ class AIProvider(ABC):
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Estimate USD cost for the given token counts."""
 
+    @abstractmethod
+    def generate_text(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        """Freeform (non-JSON) generation, e.g. for documentation.
+
+        Returns {"text": str, "prompt_tokens": int, "completion_tokens": int}.
+        """
+
 
 class ClaudeProvider(AIProvider):
     """Anthropic Claude provider."""
@@ -162,6 +169,26 @@ class ClaudeProvider(AIProvider):
     def estimate_cost(self, input_tokens, output_tokens):
         in_rate, out_rate = self.PRICING.get(self.model, self.PRICING[self.DEFAULT_MODEL])
         return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
+
+    def generate_text(self, system_prompt, user_prompt):
+        try:
+            response = self._client.messages.create(
+                model=self.model,
+                max_tokens=8192,
+                temperature=0.2,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception as e:
+            raise AIProviderError(f"Claude API error: {e}") from e
+
+        text = response.content[0].text
+        usage = getattr(response, "usage", None)
+        return {
+            "text": text,
+            "prompt_tokens": getattr(usage, "input_tokens", estimate_tokens(system_prompt + user_prompt)),
+            "completion_tokens": getattr(usage, "output_tokens", estimate_tokens(text)),
+        }
 
 
 class OpenAIProvider(AIProvider):
@@ -212,6 +239,28 @@ class OpenAIProvider(AIProvider):
     def estimate_cost(self, input_tokens, output_tokens):
         in_rate, out_rate = self.PRICING.get(self.model, self.PRICING[self.DEFAULT_MODEL])
         return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
+
+    def generate_text(self, system_prompt, user_prompt):
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                temperature=0.2,
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as e:
+            raise AIProviderError(f"OpenAI API error: {e}") from e
+
+        text = response.choices[0].message.content
+        usage = getattr(response, "usage", None)
+        return {
+            "text": text,
+            "prompt_tokens": getattr(usage, "prompt_tokens", estimate_tokens(system_prompt + user_prompt)),
+            "completion_tokens": getattr(usage, "completion_tokens", estimate_tokens(text)),
+        }
 
 
 def get_ai_provider(provider_name: str, api_key: str, model: Optional[str] = None) -> AIProvider:

@@ -88,9 +88,8 @@ Clausi - AI Compliance Auditing
 
 After configuration, the wizard shows the equivalent CLI command and runs the scan.
 
-> `clausi docs generate` (AI-powered docs generation) previously ran through
-> the hosted Clausi backend, which has been retired. A local BYOK version is
-> planned but not built yet.
+`clausi docs generate` (AI-powered docs generation) also runs fully locally,
+BYOK - see [Direct Commands](#direct-commands).
 
 ---
 
@@ -148,6 +147,22 @@ clausi scan . --no-cache
 
 Reports are always written as Markdown (`findings.md`, `compliance_report.md`,
 `traceability_matrix.md`) - no PDF/HTML export yet.
+
+### Documentation Generation
+
+```bash
+# Generate index.md, architecture.md, components.md, security.md locally
+clausi docs generate
+
+# Force a provider
+clausi docs generate --claude
+clausi docs generate --openai gpt-4o
+
+# Output elsewhere / scope files
+clausi docs generate -o ./docs --exclude "tests/*"
+```
+
+Runs the same way as `scan` - your API key, your machine, no backend.
 
 ### Other Commands
 
@@ -318,6 +333,7 @@ clausi --help       Show help
 |---------|-------------|
 | `clausi` | Launch interactive mode |
 | `clausi scan PATH` | Run compliance scan (local, BYOK) |
+| `clausi docs generate PATH` | Generate documentation (local, BYOK) |
 | `clausi setup` | First-time setup wizard |
 | `clausi config show` | Display configuration |
 | `clausi config edit` | Edit configuration |

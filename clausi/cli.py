@@ -775,18 +775,79 @@ def docs():
 
 @docs.command("generate")
 @click.argument("path", default=".", type=click.Path(exists=True))
-def docs_generate(path):
-    """Generate documentation for a project.
+@click.option("--output", "-o", type=click.Path(), help="Output directory (default: {path}/clausi/docs/latest)")
+@click.option("--exclude", multiple=True, help="Glob patterns to exclude (can be repeated)")
+@click.option("--include", multiple=True, help="Glob patterns to include (can be repeated)")
+@click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model)")
+@click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model)")
+@click.option("--skip-confirmation", "-y", is_flag=True, help="Skip cost confirmation prompt")
+def docs_generate(path, output, exclude, include, claude_model, openai_model, skip_confirmation):
+    """Generate AI-powered documentation for a project - fully local, BYOK.
 
-    Not yet available: this used to run through the hosted Clausi backend,
-    which has been retired along with the rest of hosted mode. A fully
-    local version (BYOK, same as `clausi scan`) is on the roadmap.
+    \b
+    Examples:
+        clausi docs generate                    # Auto-detects provider from env key
+        clausi docs generate --claude            # Force Claude
+        clausi docs generate --openai gpt-4o     # Force OpenAI
+        clausi docs generate --exclude "tests/*"
     """
-    console.print(f"\n{emoji('crossmark')} [yellow]`clausi docs generate` is temporarily unavailable[/yellow]")
-    console.print("\nHosted documentation generation has been retired along with the rest of")
-    console.print("Clausi's hosted backend. A local, BYOK version is planned but not built yet.")
-    console.print(f"\n{emoji('info')} In the meantime, `clausi scan` works fully locally with your own API key.")
-    sys.exit(1)
+    from clausi.core.docs_generator import DocsGenerator
+
+    provider, model = _resolve_provider_and_model(claude_model, openai_model)
+    api_key = _validate_and_get_api_key(provider, model)
+
+    project_path = Path(path).resolve()
+    console.print(f"\n{emoji('folder')} Project: [bold]{project_path}[/bold]")
+
+    output_dir = Path(output).resolve() if output else project_path / "clausi" / "docs" / "latest"
+
+    generator = DocsGenerator(
+        project_path=project_path,
+        output_dir=output_dir,
+        exclude_patterns=list(exclude),
+        include_patterns=list(include),
+        provider=provider,
+        api_key=api_key,
+        model=model,
+    )
+
+    console.print(f"\n{emoji('search')} Scanning project...")
+    file_count, loc_count = generator.scan_project()
+    console.print(f"   Files found: {file_count}")
+    console.print(f"   Lines of code: {loc_count:,}")
+
+    if file_count == 0:
+        console.print(f"\n{emoji('warning')} No files found to document.")
+        sys.exit(1)
+
+    ai_provider = get_ai_provider(provider, api_key, model)
+    est_tokens = generator.estimate_tokens()
+    est_cost = ai_provider.estimate_cost(est_tokens, est_tokens // 3)
+    console.print(f"\n{emoji('info')} Rough estimate (billed directly by your provider): ~${est_cost:.2f}")
+
+    if not skip_confirmation:
+        if not click.confirm("\nProceed with documentation generation?"):
+            console.print("[yellow]Cancelled[/yellow]")
+            sys.exit(0)
+
+    console.print(f"\n{emoji('search')} Generating documentation...\n")
+
+    def _progress(i, total, filename):
+        console.print(f"  [{i}/{total}] {filename}...")
+
+    try:
+        docs_result = generator.generate(ai_provider, on_progress=_progress)
+    except Exception as e:
+        console.print(f"\n{emoji('crossmark')} [red]Documentation generation failed: {e}[/red]")
+        sys.exit(1)
+
+    generator.save_docs(docs_result)
+
+    console.print(f"\n{emoji('checkmark')} [green]Documentation generated successfully![/green]")
+    console.print(f"\n   Output: [bold]{output_dir}[/bold]")
+    console.print(f"   Files:")
+    for filename in docs_result:
+        console.print(f"     - {filename}")
 
 
 def main():

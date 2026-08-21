@@ -840,12 +840,117 @@ class ClausInteractiveTUI:
         console.print()
 
     def docs_wizard(self):
-        """Documentation generation - temporarily unavailable."""
+        """Interactive documentation generation wizard (local, BYOK)."""
         console.print("\n[bold cyan]Documentation Generator[/bold cyan]\n")
-        console.print("[yellow]`clausi docs generate` is temporarily unavailable.[/yellow]")
-        console.print("Hosted documentation generation was retired along with the rest of")
-        console.print("Clausi's hosted backend. A local, BYOK version is planned but not built yet.")
-        console.print("\n[dim]In the meantime, `clausi scan` works fully locally with your own API key.[/dim]\n")
+        console.print("[dim]Generate AI-powered documentation for your project, fully locally.[/dim]\n")
+
+        path = self.select_path()
+
+        if path is None:
+            console.print("\n[yellow]Cancelled[/yellow]\n")
+            return
+
+        if not os.path.exists(path):
+            console.print(f"[red]Error: Path '{path}' does not exist[/red]\n")
+            return
+
+        console.print(f"[green]Selected:[/green] {Path(path).resolve()}")
+
+        # AI Provider
+        console.print()
+        from clausi.utils import config as config_module
+
+        provider_choices = [
+            questionary.Choice("Claude (your Anthropic key)", shortcut_key="1"),
+            questionary.Choice("OpenAI (your OpenAI key)", shortcut_key="2"),
+        ]
+        provider_choice = questionary.select(
+            "Select AI provider:",
+            choices=provider_choices,
+            qmark="",
+            pointer="→",
+            use_shortcuts=True
+        ).ask()
+
+        if provider_choice is None:
+            console.print("\n[yellow]Cancelled[/yellow]\n")
+            return
+
+        provider_flag = "--claude" if "Claude" in provider_choice else "--openai"
+
+        if "Claude" in provider_choice:
+            api_key = config_module.get_anthropic_key()
+            key_url = "https://console.anthropic.com/settings/keys"
+            key_prefix = "sk-ant-"
+            config_field = "anthropic"
+        else:
+            api_key = config_module.get_openai_key()
+            key_url = "https://platform.openai.com/api-keys"
+            key_prefix = "sk-"
+            config_field = "openai"
+
+        if not api_key:
+            console.print(f"\n[yellow]{'Anthropic' if config_field == 'anthropic' else 'OpenAI'} API key not found.[/yellow]")
+            console.print("[dim]Opening browser to get your API key...[/dim]\n")
+
+            import webbrowser
+            webbrowser.open(key_url)
+
+            console.print("[cyan]1.[/cyan] Create a new API key in the browser")
+            console.print(f"[cyan]2.[/cyan] Copy the key (starts with {key_prefix}...)")
+            console.print("[cyan]3.[/cyan] Paste it below\n")
+
+            api_key = Prompt.ask(f"[cyan]Paste your {'Anthropic' if config_field == 'anthropic' else 'OpenAI'} API key[/cyan]")
+            if api_key and api_key.strip():
+                config = config_module.load_config() or {}
+                config.setdefault("api_keys", {})[config_field] = api_key.strip()
+                if config_module.save_config(config):
+                    console.print("[green]✓[/green] API key saved!\n")
+                else:
+                    console.print("[red]Failed to save API key[/red]\n")
+                    return
+            else:
+                console.print("[yellow]No API key provided. Cancelled.[/yellow]\n")
+                return
+
+        # Build and run command
+        cmd_parts = ["clausi", "docs", "generate"]
+
+        if " " in path:
+            cmd_parts.append(f'"{path}"')
+        else:
+            cmd_parts.append(path)
+
+        cmd_parts.append(provider_flag)
+
+        cmd = " ".join(cmd_parts)
+
+        console.print(f"\n[dim]Running: {cmd}[/dim]\n")
+        exit_code = os.system(cmd)
+
+        if exit_code == 0:
+            abs_path = Path(path).resolve()
+            docs_dir = abs_path / "clausi" / "docs" / "latest"
+            if docs_dir.exists():
+                console.print(f"\n[green]✓[/green] Documentation generated in: {docs_dir}")
+
+                open_docs = questionary.confirm(
+                    "Open documentation in browser/editor?",
+                    default=True
+                ).ask()
+                if open_docs:
+                    index_file = docs_dir / "index.md"
+                    if index_file.exists():
+                        self.open_file(index_file)
+                    else:
+                        if sys.platform == 'win32':
+                            os.startfile(str(docs_dir))
+                        elif sys.platform == 'darwin':
+                            os.system(f'open "{docs_dir}"')
+                        else:
+                            os.system(f'xdg-open "{docs_dir}"')
+
+        console.print()
 
 
 if __name__ == "__main__":

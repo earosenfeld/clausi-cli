@@ -167,7 +167,3 @@ CLAUDE/
 
 # Tests (internal)
 tests/
-
-# Proprietary prompts (backend only)
-clausi/core/docs_prompts.py
-clausi/core/docs_generator.py
