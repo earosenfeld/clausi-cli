@@ -81,7 +81,7 @@ def create_default_config():
                 "ttl_days": 30
             },
             "ui": {
-                "auto_open_findings": True,
+                "auto_open_findings": False,
                 "show_cache_stats": True
             }
         }
@@ -559,7 +559,8 @@ def list_models():
 @click.option("--show-details", is_flag=True, help="Show per-file token estimates")
 @click.option("--min-severity", type=click.Choice(["info", "low", "medium", "high", "critical"]), default="info", help="Minimum severity to report")
 @click.option("--ignore", multiple=True, help="Ignore files/directories (can be given multiple times)")
-@click.option("--open-findings", is_flag=True, help="Auto-open findings.md in default editor after scan")
+@click.option("--open-findings/--no-open-findings", default=None,
+              help="Open findings.md in your editor after the scan (default: off)")
 @click.option("--show-markdown", is_flag=True, help="Display markdown findings summary in terminal")
 @click.option("--show-cache-stats/--no-cache-stats", default=None, help="Show/hide cache statistics (default: from config)")
 @click.option("--no-cache", is_flag=True, help="Disable the local result cache for this run")
@@ -806,7 +807,13 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     if auto_show and findings_md.exists():
         display_findings_summary(findings_md)
 
-    auto_open = open_findings or (cfg.get("ui", {}).get("auto_open_findings", True) if cfg else True)
+    # Off unless asked for. Launching an editor on every scan hijacks the
+    # user's screen on repeat runs and is simply wrong in CI; --open-findings
+    # opts in, --no-open-findings always wins over the config.
+    if open_findings is None:
+        auto_open = bool(cfg.get("ui", {}).get("auto_open_findings", False)) if cfg else False
+    else:
+        auto_open = open_findings
     if auto_open and findings_md.exists():
         open_in_editor(findings_md)
 

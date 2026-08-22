@@ -488,6 +488,47 @@ class TestShippedRegressions:
         assert project.resolve() in out.resolve().parents
         assert elsewhere.resolve() not in out.resolve().parents
 
+    def test_scan_does_not_launch_an_editor_by_default(self, tmp_path):
+        """Opening an editor on every scan hijacks the screen and breaks CI.
+
+        There was previously an --open-findings opt-in but no way to opt out,
+        and the config defaulted to on.
+        """
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "a.py").write_text("print('x')")
+
+        runner = CliRunner()
+        with patch("clausi.cli.get_ai_provider", return_value=_fake_provider()), \
+             patch("clausi.utils.config.get_anthropic_key", return_value="sk-ant-test-key"), \
+             patch("clausi.utils.output.open_in_editor") as opener:
+            result = runner.invoke(cli, [
+                "scan", str(project), "-r", "EU-AIA", "--claude",
+                "--skip-confirmation", "-o", str(tmp_path / "out"),
+            ])
+
+        assert result.exit_code == 0, result.output
+        opener.assert_not_called()
+
+    def test_no_open_findings_overrides_config(self, tmp_path):
+        """--no-open-findings must win even when the config enables opening."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "a.py").write_text("print('x')")
+
+        runner = CliRunner()
+        with patch("clausi.cli.get_ai_provider", return_value=_fake_provider()), \
+             patch("clausi.utils.config.get_anthropic_key", return_value="sk-ant-test-key"), \
+             patch("clausi.cli.load_config", return_value={"ui": {"auto_open_findings": True}}), \
+             patch("clausi.utils.output.open_in_editor") as opener:
+            result = runner.invoke(cli, [
+                "scan", str(project), "-r", "EU-AIA", "--claude", "--skip-confirmation",
+                "--no-open-findings", "-o", str(tmp_path / "out2"),
+            ])
+
+        assert result.exit_code == 0, result.output
+        opener.assert_not_called()
+
     def test_explicit_output_flag_is_relative_to_cwd(self, tmp_path):
         """-o is a path the user typed, so it anchors where they are standing.
 
