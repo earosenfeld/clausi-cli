@@ -56,6 +56,35 @@ DOC_EXTENSIONS = {
 # Max total bytes of file content sent to the AI per doc-gen run.
 MAX_CONTEXT_BYTES = 400_000
 
+
+def strip_markdown_fence(text: str) -> str:
+    """Unwrap a whole document that the model wrapped in a ```markdown fence.
+
+    Models occasionally return the entire doc inside one fenced block, which
+    renders as a literal code block instead of markdown. Only unwrap when the
+    fence encloses the *whole* document - a doc that legitimately opens with a
+    code sample must be left alone.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```") or not stripped.endswith("```"):
+        return text
+
+    lines = stripped.split("\n")
+    if len(lines) < 2:
+        return text
+
+    # The opening fence may carry an info string (```markdown, ```md).
+    info = lines[0][3:].strip().lower()
+    if info and info not in ("markdown", "md"):
+        return text
+
+    body = lines[1:-1]
+    # If any inner line closes the fence, the block does not span the document.
+    if any(line.strip() == "```" for line in body):
+        return text
+
+    return "\n".join(body).strip() + "\n"
+
 SYSTEM_PROMPT = (
     "You are a senior software engineer writing clear, accurate technical "
     "documentation for a codebase. Base everything strictly on the provided "
@@ -135,6 +164,18 @@ class DocsGenerator:
         all_excludes = DEFAULT_EXCLUDES + self.exclude_patterns
         exclude_spec = pathspec.PathSpec.from_lines('gitwildmatch', all_excludes)
 
+        # Honor .clausiignore the same way `clausi scan` does. Docs generation
+        # sends file contents to the user's AI provider, so a path the user
+        # excluded from scanning must not be shipped out here either.
+        from clausi.core.scanner import find_clausiignore_file, parse_clausiignore_file
+
+        clausiignore_spec = None
+        clausiignore_file = find_clausiignore_file(str(self.project_path))
+        if clausiignore_file:
+            clausiignore_spec = parse_clausiignore_file(clausiignore_file)
+            if clausiignore_spec:
+                console.print(f"Using .clausiignore file: {clausiignore_file}")
+
         # Build include patterns (if specified)
         include_spec = None
         if self.include_patterns:
@@ -158,6 +199,9 @@ class DocsGenerator:
 
             # Check excludes
             if exclude_spec.match_file(rel_path_str):
+                continue
+
+            if clausiignore_spec and clausiignore_spec.match_file(rel_path_str):
                 continue
 
             # Check includes (if specified)
@@ -338,7 +382,7 @@ class DocsGenerator:
 
             user_prompt = f"{instructions}\n\n---\nProject context:\n\n{context}"
             result = ai_provider.generate_text(SYSTEM_PROMPT, user_prompt)
-            docs[filename] = result["text"]
+            docs[filename] = strip_markdown_fence(result["text"])
 
         return docs
 

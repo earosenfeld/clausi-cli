@@ -559,5 +559,45 @@ class TestShippedRegressions:
         assert not (project / "myreports").exists(), "explicit -o leaked into scanned project"
 
 
+class TestDocsGeneration:
+    """`clausi docs generate` - verified end to end for the first time 2026-08-23."""
+
+    def test_whole_document_markdown_fence_is_unwrapped(self):
+        from clausi.core.docs_generator import strip_markdown_fence
+
+        wrapped = "```markdown\n# Title\n\nSome prose.\n```"
+        assert strip_markdown_fence(wrapped) == "# Title\n\nSome prose.\n"
+
+    def test_document_opening_with_a_code_sample_is_left_alone(self):
+        from clausi.core.docs_generator import strip_markdown_fence
+
+        # Starts and ends with a fence, but they are two separate blocks.
+        doc = "```bash\nclausi scan .\n```\n\nProse.\n\n```python\nx = 1\n```"
+        assert strip_markdown_fence(doc) == doc
+
+        # A real code block, not a document wrapper.
+        py = "```python\nx = 1\n```"
+        assert strip_markdown_fence(py) == py
+
+    def test_docs_generation_honors_clausiignore(self, tmp_path):
+        """A path excluded from scanning must not be shipped to the AI provider here either."""
+        from clausi.core.docs_generator import DocsGenerator
+
+        (tmp_path / "keep.py").write_text("def f():\n    return 1\n")
+        secret = tmp_path / "secret"
+        secret.mkdir()
+        (secret / "keys.py").write_text("TOKEN = 'sk-live-do-not-send'\n")
+        (tmp_path / ".clausiignore").write_text("secret/\n")
+
+        generator = DocsGenerator(str(tmp_path), str(tmp_path / "out"))
+        generator.scan_project()
+
+        paths = {f["path"].replace("\\", "/") for f in generator.files}
+        assert "keep.py" in paths
+        assert not any(p.startswith("secret/") for p in paths), (
+            f"docs generate leaked a .clausiignore'd path: {paths}"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
