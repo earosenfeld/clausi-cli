@@ -15,10 +15,12 @@ We never receive, store, or process your source code - it is architecturally
 impossible, because there's no backend for it to go to.
 
 **What does leave your machine:** to run the AI analysis, Clausi sends
-relevant code snippets to the AI provider *you* choose - your own
-Anthropic (`api.anthropic.com`) or OpenAI (`api.openai.com`) account, under
-your own API key. You're billed directly by that provider, not by us. That
-is a materially different trust boundary than sending your code to Clausi:
+relevant code snippets to the AI provider *you* choose - either through a
+coding agent already installed and signed in on your machine (Claude Code or
+the Codex CLI), or through your own Anthropic (`api.anthropic.com`) or OpenAI
+(`api.openai.com`) account under your own API key. Either way you're billed
+by that provider, not by us. That is a materially different trust boundary
+than sending your code to Clausi:
 you already have a vendor relationship and a DPA with Anthropic or OpenAI,
 you control the account, and you can revoke the key at any time. Clausi
 itself is simply never in that data path.
@@ -65,12 +67,25 @@ clausi --version
 
 ## Quick Start
 
+**Already have Claude Code or Codex installed? You need no API key at all:**
+
 ```bash
-# Set an API key once
+# Scan current directory against the EU AI Act using your local Claude Code
+clausi scan . -r EU-AIA --claude-code
+
+# ...or your local Codex CLI
+clausi scan . -r EU-AIA --codex
+```
+
+This routes the analysis through the agent CLI already on your machine, billed
+under the subscription you already pay for. Nothing extra to sign up for.
+
+**Or bring your own API key:**
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
 # or: export OPENAI_API_KEY=sk-your-key-here
 
-# Scan current directory against EU AI Act
 clausi scan . -r EU-AIA
 
 # Scan with multiple regulations
@@ -145,17 +160,29 @@ clausi scan . --preset critical-only
 clausi scan . --preset high-priority
 
 # Include specific clauses
-clausi scan . --include EUAIA-3.1 --include EUAIA-9.1
+clausi scan . -r EU-AIA --include Article-9 --include Article-13
 
 # Exclude specific clauses
-clausi scan . --exclude EUAIA-10.2
+clausi scan . -r EU-AIA --exclude Article-10
+```
+
+Clause IDs are matched exactly against the `id:` fields in the regulation
+pack, so use the real article/clause identifiers - `Article-9` for the EU AI
+Act, `Clause-4` for ISO 42001, `Security-Rule-164.308` for HIPAA. To browse
+the IDs in a pack, use the interactive picker:
+
+```bash
+clausi scan . -r EU-AIA --select-clauses
 ```
 
 ### Output Options
 
 ```bash
-# Auto-open findings in your editor
+# Open findings.md in your editor when the scan finishes (off by default)
 clausi scan . --open-findings
+
+# Force it off, overriding ui.auto_open_findings in your config
+clausi scan . --no-open-findings
 
 # Show summary in terminal
 clausi scan . --show-markdown
@@ -192,7 +219,11 @@ Clausi server, or third-party rendering service.
 # Generate index.md, architecture.md, components.md, security.md locally
 clausi docs generate
 
-# Force a provider
+# No API key needed - use a local agent CLI
+clausi docs generate --claude-code
+clausi docs generate --codex
+
+# Or force an API-key provider
 clausi docs generate --claude
 clausi docs generate --openai gpt-4o
 
@@ -200,7 +231,9 @@ clausi docs generate --openai gpt-4o
 clausi docs generate -o ./docs --exclude "tests/*"
 ```
 
-Runs the same way as `scan` - your API key, your machine, no backend.
+Runs the same way as `scan`: same providers, same auto-detection, your
+machine, no backend. It also honors `.clausiignore`, so anything you've
+excluded from scanning is not sent to your AI provider here either.
 
 ### Other Commands
 
@@ -224,7 +257,41 @@ clausi cache clear
 
 ## AI Providers
 
-Clausi is BYOK-only - pick whichever provider you already have a key for:
+Clausi needs an AI model to do the analysis, and there are two ways to give it
+one. Either works with every regulation, flag, and report format.
+
+| Route | Flag | Needs an API key? | Who bills you |
+|-------|------|-------------------|---------------|
+| Local agent CLI | `--claude-code`, `--codex` | No | Nobody extra - it runs under the subscription you already have |
+| Your own API key | `--claude`, `--openai` | Yes | Anthropic or OpenAI, per token |
+
+### Local agent CLIs (no API key)
+
+If you already have **Claude Code** or the **Codex CLI** installed, Clausi will
+drive it directly:
+
+```bash
+# Use your local Claude Code installation
+clausi scan . -r EU-AIA --claude-code
+
+# Use your local Codex CLI
+clausi scan . -r EU-AIA --codex
+```
+
+Clausi shells out to the `claude` or `codex` binary already on your `PATH` and
+passes the prompt over stdin. There is no API key to configure and no
+per-token charge from Clausi or from the provider's API - the work runs
+under whatever plan already covers that CLI. Estimated cost is reported as
+`$0.00` for these runs, because from Clausi's side it is.
+
+Requirements:
+
+- The relevant CLI must be installed and on your `PATH` (`claude --version`
+  or `codex --version` should work in the same shell).
+- You must already be signed in to that CLI.
+
+If you pass `--claude-code` or `--codex` and the binary isn't found, Clausi
+tells you which one is missing rather than silently falling back.
 
 ### Claude (Anthropic)
 
@@ -246,13 +313,23 @@ clausi scan . --openai
 clausi scan . --openai gpt-4o
 ```
 
-If neither `--claude` nor `--openai` is passed, Clausi auto-detects: it uses
-`ANTHROPIC_API_KEY` if set, otherwise `OPENAI_API_KEY`, otherwise it exits
-with instructions for getting a key.
+### Auto-detection
 
-You are billed directly by Anthropic/OpenAI for the tokens used. Clausi
-itself is free, has no backend in the scan path, and never sees your key
-or your code - only the AI provider you chose does, under your own account.
+Pass no provider flag and Clausi works out what you have, in this order:
+
+1. `ANTHROPIC_API_KEY`
+2. `OPENAI_API_KEY`
+3. A local Claude Code installation
+4. A local Codex CLI installation
+5. Otherwise it exits, showing you both routes
+
+So on a machine with Claude Code and no keys set, a bare `clausi scan . -r GDPR`
+just works.
+
+When you use an API key, you are billed directly by Anthropic/OpenAI for the
+tokens used. Clausi itself is free either way, has no backend in the scan path,
+and never sees your key or your code - only the AI provider you chose does,
+under your own account.
 
 ---
 
@@ -409,10 +486,12 @@ clausi --help       Show help
 | `-r, --regulation TEXT` | Regulation to scan against (can repeat) |
 | `--claude [MODEL]` | Use Claude with your Anthropic API key |
 | `--openai [MODEL]` | Use OpenAI with your API key |
+| `--claude-code` | Use your local Claude Code CLI (no API key) |
+| `--codex` | Use your local Codex CLI (no API key) |
 | `--preset TEXT` | Use preset: `critical-only`, `high-priority` |
 | `--include TEXT` | Include specific clauses (can repeat) |
 | `--exclude TEXT` | Exclude specific clauses (can repeat) |
-| `--open-findings` | Auto-open findings.md after scan |
+| `--open-findings` / `--no-open-findings` | Open findings.md in your editor after the scan (default: off) |
 | `--show-markdown` | Display summary in terminal |
 | `--show-cache-stats` | Show cache hit/miss statistics |
 | `--no-cache` | Disable the local cache for this run |

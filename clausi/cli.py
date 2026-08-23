@@ -357,22 +357,26 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[
 def cli(ctx):
     """Clausi - free, local, BYOK AI compliance auditing CLI.
 
-    Everything runs on your machine. Bring your own Anthropic or
-    OpenAI API key - you pay that provider directly, nothing goes
-    through a Clausi account.
+    Everything runs on your machine. Use a coding agent you already have
+    signed in (Claude Code / Codex), or bring your own Anthropic or OpenAI
+    API key - you pay that provider directly, nothing goes through a
+    Clausi account.
 
     \b
     Getting Started:
-      1. Set an API key:            export ANTHROPIC_API_KEY=sk-ant-...
+      1. Have Claude Code or Codex? Nothing to set up - skip to step 2.
+         Otherwise:                 export ANTHROPIC_API_KEY=sk-ant-...
       2. Just run:                  clausi
       3. Or scan directly:          clausi scan . -r EU-AIA
 
     \b
     Quick Examples:
       clausi                                    # Interactive mode
-      clausi scan . -r EU-AIA -r GDPR          # Scan with your Anthropic/OpenAI key
-      clausi scan . --claude                   # Force Claude
-      clausi scan . --openai gpt-4o            # Force OpenAI
+      clausi scan . -r EU-AIA --claude-code    # Use local Claude Code, no API key
+      clausi scan . -r EU-AIA --codex          # Use local Codex CLI, no API key
+      clausi scan . -r EU-AIA -r GDPR          # Auto-detect key or local agent
+      clausi scan . --claude                   # Force Claude via API key
+      clausi scan . --openai gpt-4o            # Force OpenAI via API key
     """
     create_default_config()
 
@@ -914,20 +918,25 @@ def docs():
 @click.option("--include", multiple=True, help="Glob patterns to include (can be repeated)")
 @click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model)")
 @click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model)")
+@click.option("--claude-code", is_flag=True, help="Use your local Claude Code CLI (no API key needed)")
+@click.option("--codex", is_flag=True, help="Use your local Codex CLI (no API key needed)")
 @click.option("--skip-confirmation", "-y", is_flag=True, help="Skip cost confirmation prompt")
-def docs_generate(path, output, exclude, include, claude_model, openai_model, skip_confirmation):
-    """Generate AI-powered documentation for a project - fully local, BYOK.
+def docs_generate(path, output, exclude, include, claude_model, openai_model,
+                  claude_code, codex, skip_confirmation):
+    """Generate AI-powered documentation for a project - fully local.
 
     \b
     Examples:
-        clausi docs generate                    # Auto-detects provider from env key
-        clausi docs generate --claude            # Force Claude
-        clausi docs generate --openai gpt-4o     # Force OpenAI
+        clausi docs generate                     # Auto-detects key or local agent
+        clausi docs generate --claude-code       # Local Claude Code, no API key
+        clausi docs generate --codex             # Local Codex CLI, no API key
+        clausi docs generate --claude            # Force Claude via API key
+        clausi docs generate --openai gpt-4o     # Force OpenAI via API key
         clausi docs generate --exclude "tests/*"
     """
     from clausi.core.docs_generator import DocsGenerator
 
-    provider, model = _resolve_provider_and_model(claude_model, openai_model)
+    provider, model = _resolve_provider_and_model(claude_model, openai_model, claude_code, codex)
     api_key = _validate_and_get_api_key(provider, model)
 
     project_path = Path(path).resolve()
