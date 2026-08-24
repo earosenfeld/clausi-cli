@@ -130,14 +130,34 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
     cache_key = cache.generate_cache_key(
         content, regulation, clauses=clause_ids, provider=provider.name, model=provider.model
     )
-    cached = cache.get(cache_key)
-    if cached is not None:
-        findings = cached["findings"]
+
+    def _from_cache(entry):
+        findings = entry["findings"]
         for f in findings:
             f["file_path"] = file_path
             f["cached"] = True
         return findings, 0, 0, 0.0
 
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return _from_cache(cached)
+
+    # Identical content scanned concurrently shares one cache key. Serialize on
+    # it so only the first worker pays for the API call and the rest reuse the
+    # result - which also keeps duplicate files from getting different findings
+    # out of a non-deterministic model.
+    with cache.key_lock(cache_key):
+        cached = cache.peek(cache_key)
+        if cached is not None:
+            return _from_cache(cached)
+
+        return _analyze_uncached(
+            provider, cache, regulation, clauses, file_path, content, cache_key
+        )
+
+
+def _analyze_uncached(provider, cache, regulation, clauses, file_path, content, cache_key):
+    """Call the provider and cache the result. Caller holds the key lock."""
     result = provider.analyze_code(regulation, clauses, file_path, content)
     findings = [_remap_finding(raw, file_path) for raw in result["findings"]]
 

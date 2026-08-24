@@ -14,6 +14,7 @@ Usage:
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -720,3 +721,129 @@ class TestRegisterRoundTrip:
         assert "Resolved Since Prior Assessment" in md
         assert "Article-9" in md
         assert prepared["resolved_findings"][0]["finding_id"] in md
+
+
+class TestConcurrentScanning:
+    """Scans run on a thread pool; duplicate content must not be paid for twice.
+
+    Real repos carry vendored copies and repeated boilerplate that hash to one
+    cache key. Before 2026-08-24 every copy missed the cache simultaneously,
+    each paid for its own API call, and a non-deterministic model handed
+    byte-identical files different findings.
+    """
+
+    def _cache(self, tmp_path):
+        from clausi.core.cache import LocalCache
+        return LocalCache(cache_dir=tmp_path)
+
+    def test_identical_content_costs_one_api_call(self, tmp_path):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        from clausi.core.compliance_analyzer import analyze_file
+
+        calls = []
+        calls_lock = threading.Lock()
+
+        class SlowProvider:
+            name, model = "fake", "fake-1"
+
+            def analyze_code(self, regulation, clauses, file_path, code):
+                with calls_lock:
+                    calls.append(file_path)
+                time.sleep(0.2)  # widen the race window
+                return {"findings": [{"clause_id": "Article-9", "severity": "high",
+                                      "explanation": "x", "location": "1"}],
+                        "prompt_tokens": 10, "completion_tokens": 5}
+
+            def estimate_cost(self, p, c):
+                return 0.0
+
+        cache = self._cache(tmp_path)
+        provider = SlowProvider()
+        shared = "identical content in every copy\n"
+        files = [{"path": f"vendor/copy_{i}.py", "content": shared} for i in range(6)]
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(
+                lambda fd: analyze_file(provider, cache, "EU-AIA", [], None, fd), files
+            ))
+
+        assert len(calls) == 1, f"expected 1 API call for 6 identical files, got {len(calls)}"
+        assert all(r[0] for r in results), "every file must still receive findings"
+        # Each copy is attributed to its own path, not the one that paid.
+        assert {r[0][0]["file_path"] for r in results} == {f["path"] for f in files}
+
+    def test_distinct_content_still_runs_concurrently(self, tmp_path):
+        """Dedup must key on content, not serialize the whole scan."""
+        from concurrent.futures import ThreadPoolExecutor
+        from clausi.core.compliance_analyzer import analyze_file
+
+        class Provider:
+            name, model = "fake", "fake-1"
+
+            def analyze_code(self, regulation, clauses, file_path, code):
+                return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
+
+            def estimate_cost(self, p, c):
+                return 0.0
+
+        cache = self._cache(tmp_path)
+        files = [{"path": f"m_{i}.py", "content": f"unique {i}"} for i in range(8)]
+        started = time.time()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(
+                lambda fd: analyze_file(Provider(), cache, "EU-AIA", [], None, fd), files
+            ))
+        assert time.time() - started < 5
+
+    def test_cache_writes_are_atomic(self, tmp_path):
+        """A torn write would strand a truncated file that never reads back."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        cache = self._cache(tmp_path)
+        payload = {"findings": [{"explanation": "x" * 20000}]}
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _: cache.set("scan_same_key", payload), range(24)))
+
+        assert cache.get("scan_same_key") is not None, "entry unreadable after concurrent writes"
+        # No temp files left behind.
+        assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+    def test_hit_and_miss_counters_survive_concurrency(self, tmp_path):
+        from concurrent.futures import ThreadPoolExecutor
+
+        cache = self._cache(tmp_path)
+        cache.set("scan_warm", {"findings": []})
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _: cache.get("scan_warm"), range(200)))
+        assert cache.hits == 200, f"lost increments: {cache.hits}"
+
+    def test_deduplicated_file_is_counted_once(self, tmp_path):
+        """Hit rate must be reported against the number of files, not lookups."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        from clausi.core.compliance_analyzer import analyze_file
+
+        class SlowProvider:
+            name, model = "fake", "fake-1"
+
+            def analyze_code(self, regulation, clauses, file_path, code):
+                time.sleep(0.2)
+                return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
+
+            def estimate_cost(self, p, c):
+                return 0.0
+
+        cache = self._cache(tmp_path)
+        files = [{"path": f"copy_{i}.py", "content": "same"} for i in range(6)]
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            list(pool.map(
+                lambda fd: analyze_file(SlowProvider(), cache, "EU-AIA", [], None, fd), files
+            ))
+
+        stats = cache.stats()
+        assert stats["total_files"] == 6, f"6 files reported as {stats['total_files']} lookups"
+        assert stats["cache_hits"] == 5
+        assert stats["cache_misses"] == 1
