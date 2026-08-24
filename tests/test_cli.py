@@ -37,7 +37,7 @@ def test_scan_directory(tmp_path):
 def _fake_provider(findings):
     provider = MagicMock()
     provider.name = "claude"
-    provider.model = "claude-3-5-sonnet-20241022"
+    provider.model = "claude-opus-5"
     provider.analyze_code.return_value = {
         "findings": findings,
         "prompt_tokens": 100,
@@ -128,7 +128,7 @@ def test_scan_falls_back_to_local_agent_when_no_key(runner, tmp_path):
 def _fake_docs_provider():
     provider = MagicMock()
     provider.name = "claude"
-    provider.model = "claude-3-5-sonnet-20241022"
+    provider.model = "claude-opus-5"
     provider.generate_text.return_value = {
         "text": "# Doc\n\nGenerated content.",
         "prompt_tokens": 500,

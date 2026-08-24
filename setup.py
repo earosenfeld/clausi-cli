@@ -73,7 +73,7 @@ class CustomBuildCommand(build_py):
             # Use simple string formatting instead of yaml
             config_str = """ai:
   provider: claude
-  model: claude-3-5-sonnet-20241022
+  model: claude-opus-5
 api_keys:
   openai: ""
   anthropic: ""

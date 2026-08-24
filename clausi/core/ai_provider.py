@@ -172,9 +172,19 @@ class ClaudeProvider(AIProvider):
     """Anthropic Claude provider."""
 
     name = "claude"
-    DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
-    # USD per 1M tokens (input, output)
+    DEFAULT_MODEL = "claude-opus-5"
+    # USD per 1M tokens (input, output). Verified against Anthropic's published
+    # rates 2026-08-24. These drive the pre-scan estimate and the --max-cost
+    # guardrail, so a stale entry silently under-quotes the user; re-check when
+    # bumping the default model. Unknown models fall back to DEFAULT_MODEL's
+    # rate (see estimate_cost), which is why the default must stay listed here.
     PRICING = {
+        "claude-opus-5": (5.0, 25.0),
+        "claude-sonnet-5": (3.0, 15.0),
+        "claude-haiku-4-5": (1.0, 5.0),
+        "claude-opus-4-8": (5.0, 25.0),
+        "claude-sonnet-4-6": (3.0, 15.0),
+        # Retired models kept so existing configs still price correctly.
         "claude-3-5-sonnet-20241022": (3.0, 15.0),
         "claude-3-opus-20240229": (15.0, 75.0),
         "claude-3-sonnet-20240229": (3.0, 15.0),

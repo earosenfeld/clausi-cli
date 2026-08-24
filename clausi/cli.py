@@ -62,7 +62,7 @@ def create_default_config():
         config = {
             "ai": {
                 "provider": "claude",
-                "model": "claude-3-5-sonnet-20241022",
+                "model": "claude-opus-5",
             },
             "api_keys": {
                 "anthropic": "",  # Prefer the ANTHROPIC_API_KEY env var
@@ -445,7 +445,7 @@ def show():
 
     ai_settings = config.get("ai", {})
     table.add_row("AI Provider", ai_settings.get("provider", "claude (default)"))
-    table.add_row("AI Model", ai_settings.get("model", "claude-3-5-sonnet-20241022 (default)"))
+    table.add_row("AI Model", ai_settings.get("model", "claude-opus-5 (default)"))
 
     api_keys = config.get("api_keys", {})
     anthropic_key = api_keys.get("anthropic", "") or os.getenv("ANTHROPIC_API_KEY", "")
@@ -528,9 +528,9 @@ def list_models():
     table.add_column("Cost/1M tokens", style="magenta")
     table.add_column("Recommended", style="white")
 
-    table.add_row("Claude", "claude-3-5-sonnet-20241022", "200k", "$3 / $15", "Default")
-    table.add_row("Claude", "claude-3-opus-20240229", "200k", "$15 / $75", "")
-    table.add_row("Claude", "claude-3-sonnet-20240229", "200k", "$3 / $15", "")
+    table.add_row("Claude", "claude-opus-5", "1M", "$5 / $25", "Default")
+    table.add_row("Claude", "claude-sonnet-5", "1M", "$3 / $15", "Cheaper")
+    table.add_row("Claude", "claude-haiku-4-5", "200k", "$1 / $5", "Fastest")
     table.add_row("OpenAI", "gpt-4o", "128k", "$5 / $15", "Default")
     table.add_row("OpenAI", "gpt-4-turbo", "128k", "$10 / $30", "")
     table.add_row("OpenAI", "gpt-4", "128k", "$30 / $60", "")
@@ -538,7 +538,7 @@ def list_models():
     console.print(table)
     console.print("\n[yellow]Usage:[/yellow]")
     console.print("  [cyan]clausi scan . --claude[/cyan]                           # Default Claude model")
-    console.print("  [cyan]clausi scan . --claude claude-3-5-sonnet-20241022[/cyan]  # Specify model")
+    console.print("  [cyan]clausi scan . --claude claude-sonnet-5[/cyan]            # Specify model")
     console.print("  [cyan]clausi scan . --openai gpt-4o[/cyan]                     # Use OpenAI")
     console.print("\n[yellow]Set API keys:[/yellow]")
     console.print("  [cyan]clausi config set --anthropic-key sk-ant-...[/cyan]")
@@ -549,7 +549,7 @@ def list_models():
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--regulation", "--regulations", "-r", multiple=True, help="Regulation(s) to check against (built-in + custom). Can be given multiple times, e.g. -r EU-AIA -r GDPR")
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
-@click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model: --claude claude-3-5-sonnet-20241022)")
+@click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model: --claude claude-sonnet-5)")
 @click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model: --openai gpt-4o)")
 @click.option("--claude-code", is_flag=True, help="Use your local Claude Code CLI - no API key needed")
 @click.option("--codex", is_flag=True, help="Use your local Codex CLI - no API key needed")

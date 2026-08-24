@@ -119,7 +119,7 @@ Clausi - AI Compliance Auditing
 
 1. **Select project location** - current directory, file explorer, or manual path
 2. **Choose AI provider** - Claude (Anthropic key) or OpenAI (OpenAI key)
-3. **Select model** - e.g. claude-3-5-sonnet, gpt-4o
+3. **Select model** - e.g. claude-opus-5, gpt-4o
 4. **Choose regulations** - one, several, or a custom regulation
 5. **Select preset** (optional) - all clauses, critical-only, or high-priority
 
@@ -300,7 +300,7 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 clausi scan . --claude
 
 # Or specify a model
-clausi scan . --claude claude-3-5-sonnet-20241022
+clausi scan . --claude claude-sonnet-5
 ```
 
 ### OpenAI
@@ -382,7 +382,7 @@ Example configuration:
 ```yaml
 ai:
   provider: claude
-  model: claude-3-5-sonnet-20241022
+  model: claude-opus-5
 
 api_keys:
   anthropic: "sk-ant-..."         # For --claude mode

@@ -36,7 +36,7 @@ from clausi.utils.output import (
 def _fake_provider(findings=None):
     provider = MagicMock()
     provider.name = "claude"
-    provider.model = "claude-3-5-sonnet-20241022"
+    provider.model = "claude-opus-5"
     provider.analyze_code.return_value = {
         "findings": findings or [],
         "prompt_tokens": 100,
@@ -87,7 +87,7 @@ class TestMultiModelSupport:
         assert result.exit_code == 0
         assert "Claude" in result.output
         assert "OpenAI" in result.output
-        assert "claude-3-5-sonnet-20241022" in result.output
+        assert "claude-opus-5" in result.output
 
 
 class TestClauseScoping:
@@ -251,7 +251,7 @@ class TestConfigManagement:
             mock_load.return_value = {
                 "ai": {
                     "provider": "claude",
-                    "model": "claude-3-5-sonnet-20241022"
+                    "model": "claude-opus-5"
                 },
                 "api_keys": {
                     "anthropic": "test-key",
@@ -395,7 +395,7 @@ class TestShippedRegressions:
         from clausi.core.ai_provider import ClaudeProvider
 
         provider = ClaudeProvider.__new__(ClaudeProvider)
-        provider.model = "claude-3-5-sonnet-20241022"
+        provider.model = "claude-opus-5"
         captured = {}
 
         class _FakeMessages:
@@ -436,7 +436,7 @@ class TestShippedRegressions:
         }]})
 
         provider = ClaudeProvider.__new__(ClaudeProvider)
-        provider.model = "claude-3-5-sonnet-20241022"
+        provider.model = "claude-opus-5"
         provider._client = MagicMock(messages=MagicMock(create=MagicMock(
             return_value=MagicMock(
                 content=[MagicMock(text=wrapper.format(body=body))],
@@ -601,3 +601,22 @@ class TestDocsGeneration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+class TestModelPricing:
+    """The default model must be priced, or cost estimates silently under-quote."""
+
+    def test_default_claude_model_has_a_pricing_entry(self):
+        from clausi.core.ai_provider import ClaudeProvider
+        assert ClaudeProvider.DEFAULT_MODEL in ClaudeProvider.PRICING
+
+    def test_default_openai_model_has_a_pricing_entry(self):
+        from clausi.core.ai_provider import OpenAIProvider
+        assert OpenAIProvider.DEFAULT_MODEL in OpenAIProvider.PRICING
+
+    def test_configured_default_model_matches_provider_default(self):
+        """config.DEFAULT_MODELS and the provider classes must not drift apart."""
+        from clausi.core.ai_provider import ClaudeProvider, OpenAIProvider
+        from clausi.utils.config import DEFAULT_MODELS
+        assert DEFAULT_MODELS["claude"] == ClaudeProvider.DEFAULT_MODEL
+        assert DEFAULT_MODELS["openai"] == OpenAIProvider.DEFAULT_MODEL

@@ -639,10 +639,9 @@ class ClausInteractiveTUI:
         if "Claude" in provider_choice:
             console.print()
             claude_models = [
-                questionary.Choice("claude-sonnet-4-20250514 (Recommended - best balance)", shortcut_key="1"),
-                questionary.Choice("claude-3-5-sonnet-20241022 (Previous generation)", shortcut_key="2"),
-                questionary.Choice("claude-3-opus-20240229 (Most capable, slower)", shortcut_key="3"),
-                questionary.Choice("claude-3-5-haiku-20241022 (Fastest, cheapest)", shortcut_key="4")
+                questionary.Choice("claude-opus-5 (Recommended - most capable)", shortcut_key="1"),
+                questionary.Choice("claude-sonnet-5 (Cheaper, still strong)", shortcut_key="2"),
+                questionary.Choice("claude-haiku-4-5 (Fastest, cheapest)", shortcut_key="3")
             ]
             model_choice = questionary.select(
                 "Select Claude model:",

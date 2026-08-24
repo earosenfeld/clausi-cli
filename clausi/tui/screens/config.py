@@ -281,7 +281,7 @@ class ConfigScreen(Screen):
                 # Make a minimal API call to test
                 # (This will raise an error if the key is invalid)
                 client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-opus-5",
                     max_tokens=10,
                     messages=[{"role": "user", "content": "Hi"}]
                 )
