@@ -620,3 +620,103 @@ class TestModelPricing:
         from clausi.utils.config import DEFAULT_MODELS
         assert DEFAULT_MODELS["claude"] == ClaudeProvider.DEFAULT_MODEL
         assert DEFAULT_MODELS["openai"] == OpenAIProvider.DEFAULT_MODEL
+
+
+class TestRegisterRoundTrip:
+    """Customer edits to remediation_register.csv must survive a rescan.
+
+    The register is the artifact people open in Excel; edits vanishing on the
+    next scan silently destroys their remediation tracking (found 2026-08-24).
+    """
+
+    def _scan_once(self, tmp_path, findings):
+        from clausi.core.finding_lifecycle import commit_lifecycle, prepare_findings
+        from clausi.core.remediation_register import save_remediation_register
+        out = tmp_path / "clausi" / "reports"
+        prepared = prepare_findings(
+            [dict(f) for f in findings], "EU-AIA", tmp_path, out
+        )
+        save_remediation_register(prepared["findings"], out)
+        commit_lifecycle(prepared)
+        return prepared
+
+    def _finding(self):
+        return {
+            "clause_id": "Article-9",
+            "file_path": "src/model.py",
+            "location": "lines 10-15",
+            "severity": "critical",
+            "explanation": "No risk management system.",
+        }
+
+    def _register_rows(self, tmp_path):
+        import csv, io
+        path = tmp_path / "clausi" / "reports" / "remediation_register.csv"
+        return list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
+
+    def _rewrite_register(self, tmp_path, rows):
+        import csv, io
+        path = tmp_path / "clausi" / "reports" / "remediation_register.csv"
+        out = io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+        path.write_text(out.getvalue(), encoding="utf-8-sig")
+
+    def test_csv_workflow_edits_survive_a_rescan(self, tmp_path):
+        self._scan_once(tmp_path, [self._finding()])
+
+        rows = self._register_rows(tmp_path)
+        rows[0]["Owner"] = "A. Rivera"
+        rows[0]["Ticket"] = "SEC-1234"
+        rows[0]["Status"] = "In progress"
+        rows[0]["Reviewer Notes"] = "Bias audit scheduled"
+        self._rewrite_register(tmp_path, rows)
+
+        self._scan_once(tmp_path, [self._finding()])
+
+        after = self._register_rows(tmp_path)[0]
+        assert after["Owner"] == "A. Rivera"
+        assert after["Ticket"] == "SEC-1234"
+        assert after["Status"] == "In progress"
+        assert after["Reviewer Notes"] == "Bias audit scheduled"
+
+    def test_unrecognized_status_is_rejected_not_stored(self, tmp_path):
+        """A typo'd status must not become the finding's workflow state."""
+        self._scan_once(tmp_path, [self._finding()])
+        rows = self._register_rows(tmp_path)
+        rows[0]["Status"] = "Totally Bogus"
+        self._rewrite_register(tmp_path, rows)
+
+        self._scan_once(tmp_path, [self._finding()])
+
+        assert self._register_rows(tmp_path)[0]["Status"] == "Open"
+
+    def test_a_missing_register_does_not_break_the_scan(self, tmp_path):
+        prepared = self._scan_once(tmp_path, [self._finding()])
+        assert prepared["findings"][0]["finding_id"]
+
+    def test_resolved_findings_are_named_not_just_counted(self, tmp_path):
+        self._scan_once(tmp_path, [self._finding()])
+        prepared = self._scan_once(tmp_path, [])
+
+        assert prepared["change_summary"]["resolved"] == 1
+        resolved = prepared["resolved_findings"]
+        assert len(resolved) == 1
+        assert resolved[0]["clause_id"] == "Article-9"
+        assert resolved[0]["severity"] == "critical"
+        assert resolved[0]["finding_id"].startswith("CL-EUAIA-")
+
+    def test_resolved_findings_appear_in_findings_md(self, tmp_path):
+        from clausi.core.markdown_report import MarkdownGenerator
+        self._scan_once(tmp_path, [self._finding()])
+        prepared = self._scan_once(tmp_path, [])
+
+        md = MarkdownGenerator().generate_findings_md(
+            findings=[], project_name="demo", regulation="EU AI Act",
+            audit_meta={"resolved_findings": prepared["resolved_findings"],
+                        "change_summary": prepared["change_summary"]},
+        )
+        assert "Resolved Since Prior Assessment" in md
+        assert "Article-9" in md
+        assert prepared["resolved_findings"][0]["finding_id"] in md

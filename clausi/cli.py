@@ -697,6 +697,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             "scan_command": shlex.join(sys.argv),
             "change_summary": lifecycle["change_summary"],
             "resolved_ids": lifecycle["resolved_ids"],
+            "resolved_findings": lifecycle["resolved_findings"],
             "comparison_baseline": lifecycle["is_baseline"],
             "regulation_pack_sha256": regulation_pack_hash(reg_data),
         }

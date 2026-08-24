@@ -170,6 +170,22 @@ class MarkdownGenerator:
             lines += ["## Change Since Prior Assessment", "", "| New | Changed | Reopened | No Longer Detected | Unchanged |", "|---:|---:|---:|---:|---:|",
                       f"| {changes.get('new', 0)} | {changes.get('changed', 0)} | {changes.get('reopened', 0)} | {changes.get('resolved', 0)} | {changes.get('unchanged', 0)} |", ""]
 
+        resolved = audit_meta.get("resolved_findings") or []
+        if resolved:
+            lines += ["## Resolved Since Prior Assessment", "",
+                      f"{len(resolved)} finding(s) previously reported are no longer detected. "
+                      "Confirm each was genuinely remediated rather than moved, renamed, or "
+                      "excluded from this scan's scope before treating it as closed.", "",
+                      "| Finding ID | Clause | Severity | File | Last Recorded Status |",
+                      "|---|---|---|---|---|"]
+            for r in resolved:
+                lines.append(
+                    f"| `{r.get('finding_id', '')}` | {r.get('clause_id', '')} | "
+                    f"{r.get('severity', '')} | `{r.get('file_path', '')}` | "
+                    f"{r.get('last_status', '')} |"
+                )
+            lines.append("")
+
         if themes:
             lines += ["## Top Risk Themes", ""]
             for t in themes:

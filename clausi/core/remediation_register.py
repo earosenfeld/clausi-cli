@@ -32,6 +32,49 @@ COLUMNS = (
 )
 
 
+# Columns the customer owns. Everything else in the register is regenerated
+# from the scan each run, so an edit to another column is not preserved.
+CUSTOMER_COLUMNS = {
+    "Owner": "owner",
+    "Target Date": "target_date",
+    "Status": "status",
+    "Ticket": "ticket",
+    "Reviewer Notes": "reviewer_notes",
+    "Treatment": "treatment",
+}
+
+
+def read_customer_edits(output_dir: Path) -> Dict[str, Dict[str, str]]:
+    """Read back workflow fields a customer edited in the register.
+
+    The register is the artifact people actually open in Excel, so edits have to
+    survive a rescan. Returns {finding_id: {field: value}} carrying only the
+    customer-owned columns; a missing or malformed file yields {} rather than
+    raising, because a broken register must never abort a scan.
+    """
+    register_path = Path(output_dir) / "remediation_register.csv"
+    if not register_path.exists():
+        return {}
+
+    try:
+        # utf-8-sig strips the BOM we write for Excel's benefit.
+        with register_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return {}
+
+    edits: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        finding_id = (row.get("Finding ID") or "").strip()
+        if not finding_id:
+            continue
+        edits[finding_id] = {
+            field: (row.get(column) or "").strip()
+            for column, field in CUSTOMER_COLUMNS.items()
+        }
+    return edits
+
+
 def _row(finding: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "Finding ID": finding.get("finding_id", ""),

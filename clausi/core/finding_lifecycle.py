@@ -136,6 +136,37 @@ def _atomic_text(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
+def _apply_register_edits(
+    entry: Dict[str, Any], edits: Optional[Dict[str, str]]
+) -> Dict[str, Any]:
+    """Fold customer edits from remediation_register.csv into a stored entry.
+
+    The register is regenerated from this store on every scan, so a CSV value
+    that differs from the stored one can only have been typed by a human since
+    the last run - that is the signal we use, and it means editing the YAML
+    directly still works when the CSV was left untouched.
+    """
+    if not edits:
+        return entry
+
+    merged = dict(entry)
+    for field, value in edits.items():
+        if value == str(entry.get(field) or ""):
+            continue  # unchanged since we wrote it
+        if field == "status" and value:
+            # Guard the one field with a controlled vocabulary; a typo here
+            # would otherwise silently become the finding's workflow state.
+            match = next(
+                (s for s in REMEDIATION_STATUSES if _normalize(s) == _normalize(value)),
+                None,
+            )
+            if match is None:
+                continue
+            value = match
+        merged[field] = value
+    return merged
+
+
 def prepare_findings(
     findings: List[Dict[str, Any]],
     regulation: str,
@@ -149,6 +180,10 @@ def prepare_findings(
     remediation_path = Path(project_path) / ".clausi" / "remediation.yml"
     snapshot_path = output_dir / "scan_snapshot.json"
     store = _load_yaml(remediation_path)
+    # Pick up anything the customer typed into the register since the last scan.
+    from clausi.core.remediation_register import read_customer_edits
+
+    register_edits = read_customer_edits(output_dir)
     previous = _load_snapshot(snapshot_path)
     previous_findings = previous.get("findings", {})
     if not isinstance(previous_findings, dict):
@@ -167,6 +202,7 @@ def prepare_findings(
         entry = store["findings"].get(finding_id, {})
         if not isinstance(entry, dict):
             entry = {}
+        entry = _apply_register_edits(entry, register_edits.get(finding_id))
 
         prior_status = _normalize(entry.get("status"))
         content_hash = finding_content_hash(finding)
@@ -243,6 +279,27 @@ def prepare_findings(
 
     resolved_ids = sorted(set(previous_findings) - current_ids)
     changes["resolved"] = len(resolved_ids)
+
+    # Name the findings that closed, not just how many. "Three critical gaps
+    # closed since the last assessment" is the line an auditor needs to trace,
+    # and it is only reconstructable from the prior snapshot plus the store.
+    resolved_findings = []
+    for resolved_id in resolved_ids:
+        prior = previous_findings.get(resolved_id) or {}
+        entry = store["findings"].get(resolved_id) or {}
+        if not isinstance(entry, dict):
+            entry = {}
+        resolved_findings.append(
+            {
+                "finding_id": resolved_id,
+                "clause_id": prior.get("clause_id") or entry.get("clause_id") or "",
+                "file_path": prior.get("file_path") or entry.get("file_path") or "",
+                "severity": prior.get("severity") or "",
+                "owner": entry.get("owner") or "",
+                "last_status": entry.get("status") or prior.get("status") or "",
+                "last_seen": entry.get("last_seen") or "",
+            }
+        )
     store["updated_at"] = scanned_at
     snapshot = {
         "version": 1,
@@ -255,6 +312,7 @@ def prepare_findings(
         "findings": findings,
         "change_summary": changes,
         "resolved_ids": resolved_ids,
+        "resolved_findings": resolved_findings,
         "is_baseline": not bool(previous_findings),
         "remediation_path": remediation_path,
         "snapshot_path": snapshot_path,
