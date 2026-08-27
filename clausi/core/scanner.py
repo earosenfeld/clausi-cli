@@ -20,7 +20,25 @@ SUPPORTED_EXTENSIONS = {
     '.rs', '.swift',
 }
 
-EXCLUDE_DIRS = {"venv", ".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache"}
+# Directories that hold dependencies, build output, or tool caches rather than
+# the project's own source. Scanning them bills the user to audit third-party
+# code and attributes other people's findings to their project.
+#
+# Every exclusion here is reported in the scan manifest, so a user who keeps
+# real source in one of these can see that it was skipped.
+EXCLUDE_DIRS = {
+    # Version control and editors
+    ".git", ".hg", ".svn", ".idea", ".vscode",
+    # Python environments, caches, and packaging
+    "venv", ".venv", "site-packages", "__pycache__", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", ".tox", ".nox", ".eggs", "htmlcov",
+    # JavaScript dependencies and framework build output
+    "node_modules", "bower_components", ".next", ".nuxt", ".svelte-kit",
+    # Vendored dependencies (Go, PHP/Composer)
+    "vendor",
+    # Build output
+    "dist", "build", "target", ".gradle", ".terraform",
+}
 # Clausi's own control files are not project code; listing them as "unsupported"
 # is noise in the coverage manifest.
 EXCLUDE_FILES = {".DS_Store", "*.egg-info", "*.pyc", "*.pyo", ".clausiignore"}

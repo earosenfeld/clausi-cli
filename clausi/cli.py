@@ -414,6 +414,12 @@ def _print_coverage_summary(coverage: Dict[str, Any], ignored: List[Dict[str, st
         console.print(
             f"[yellow]Not analyzed: {skipped_total} file(s) of unsupported types - {top}[/yellow]"
         )
+    excluded_dirs = coverage.get("skipped_excluded_directories") or {}
+    if excluded_dirs:
+        # Named explicitly: a few of these (build, dist, target) can legitimately
+        # hold real source, and the user needs to notice if theirs was skipped.
+        names = ", ".join(sorted(excluded_dirs))
+        console.print(f"[dim]Skipped dependency/build directories: {names}[/dim]")
     if ignored:
         console.print(f"[dim]Excluded by ignore rules: {len(ignored)} file(s)[/dim]")
     unreadable = coverage.get("unreadable") or []

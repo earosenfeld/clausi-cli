@@ -937,3 +937,29 @@ class TestScanCoverageManifest:
         assert "Coverage and Limits" in md
         assert "does not indicate compliance" in md
         assert "big.py" in md
+
+    def test_dependency_and_build_dirs_are_not_analyzed(self, tmp_path):
+        """Auditing a vendored dependency tree bills the user for third-party code."""
+        from clausi.core.scanner import scan_directory_with_coverage
+        (tmp_path / "app.py").write_text("x = 1\n")
+        for junk in (".venv", "node_modules", "dist", "build", "target", "vendor", "site-packages"):
+            d = tmp_path / junk
+            d.mkdir()
+            (d / "dep.py").write_text("y = 2\n")
+
+        files, coverage = scan_directory_with_coverage(str(tmp_path))
+
+        assert {f["path"].replace("\\", "/") for f in files} == {"app.py"}
+        skipped = coverage["skipped_excluded_directories"]
+        for junk in (".venv", "node_modules", "dist", "build", "target", "vendor"):
+            assert junk in skipped, f"{junk} was not excluded"
+
+    def test_exclusions_are_disclosed_so_they_can_be_noticed(self, tmp_path):
+        """Excluding a dir silently would hide real source kept in build/ or dist/."""
+        from clausi.core.scanner import scan_directory_with_coverage
+        (tmp_path / "app.py").write_text("x = 1\n")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "real_source.py").write_text("y = 2\n")
+
+        _, coverage = scan_directory_with_coverage(str(tmp_path))
+        assert coverage["skipped_excluded_directories"].get("build") == 1
