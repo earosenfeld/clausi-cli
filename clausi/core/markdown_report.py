@@ -141,6 +141,38 @@ class MarkdownGenerator:
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - analysis ran on this machine "
                 f"via your own AI provider; Clausi never received your code.*\n")
 
+    def _coverage_section(self, audit_meta) -> List[str]:
+        """State what was not examined, so silence is never read as compliance."""
+        coverage = audit_meta.get("coverage") or {}
+        unsupported = coverage.get("skipped_unsupported_extension") or {}
+        ignored = audit_meta.get("ignored_files") or []
+        unreadable = coverage.get("unreadable") or []
+        truncated = audit_meta.get("truncated_files") or []
+
+        if not (unsupported or ignored or unreadable or truncated):
+            return []
+
+        lines = ["## Coverage and Limits", "",
+                 "This report covers only the files listed as analyzed. Anything below was "
+                 "**not examined** - absence of a finding for it does not indicate compliance.", ""]
+
+        if unsupported:
+            total = sum(unsupported.values())
+            top = ", ".join(f"`{ext}` ({n})" for ext, n in list(unsupported.items())[:8])
+            lines += [f"- **Unsupported file types:** {total} file(s) not read - {top}"]
+        if ignored:
+            lines += [f"- **Excluded by ignore rules:** {len(ignored)} file(s)"]
+        if unreadable:
+            lines += [f"- **Could not be read:** {len(unreadable)} file(s)"]
+        if truncated:
+            lines += [f"- **Truncated before analysis:** {len(truncated)} file(s) exceeded the "
+                      "per-file limit; only the beginning of each was examined"]
+            for t in truncated[:10]:
+                lines.append(f"  - `{t.get('path')}` - {t.get('analyzed_chars')} of "
+                             f"{t.get('original_chars')} characters analyzed")
+        lines.append("")
+        return lines
+
     def generate_findings_md(self, findings, project_name, regulation, audit_meta, files_scanned=0) -> str:
         real = _real_findings(findings)
         readiness = _calculate_audit_readiness(findings)
@@ -169,6 +201,8 @@ class MarkdownGenerator:
         if changes:
             lines += ["## Change Since Prior Assessment", "", "| New | Changed | Reopened | No Longer Detected | Unchanged |", "|---:|---:|---:|---:|---:|",
                       f"| {changes.get('new', 0)} | {changes.get('changed', 0)} | {changes.get('reopened', 0)} | {changes.get('resolved', 0)} | {changes.get('unchanged', 0)} |", ""]
+
+        lines += self._coverage_section(audit_meta)
 
         resolved = audit_meta.get("resolved_findings") or []
         if resolved:

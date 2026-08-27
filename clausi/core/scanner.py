@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 
 try:
     import pathspec
@@ -12,40 +12,90 @@ except ImportError:
 from clausi.utils.console import console
 
 
-def scan_directory(path: str) -> List[Dict[str, str]]:
-    """Scan directory for files to analyze, robustly excluding common junk folders/files and directories."""
-    files_to_analyze = []
-    path = Path(path)
+# File extensions Clausi can currently analyze. Anything else is reported as
+# skipped rather than silently dropped - a reader must be able to tell the
+# difference between "inspected and clean" and "never looked at".
+SUPPORTED_EXTENSIONS = {
+    '.py', '.js', '.ts', '.java', '.cpp', '.h', '.hpp', '.c', '.cs', '.go',
+    '.rs', '.swift',
+}
 
-    # File extensions to analyze
-    extensions = {'.py', '.js', '.ts', '.java', '.cpp', '.h', '.hpp', '.c', '.cs', '.go', '.rs', '.swift'}
+EXCLUDE_DIRS = {"venv", ".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache"}
+# Clausi's own control files are not project code; listing them as "unsupported"
+# is noise in the coverage manifest.
+EXCLUDE_FILES = {".DS_Store", "*.egg-info", "*.pyc", "*.pyo", ".clausiignore"}
 
-    # Directories to exclude
-    EXCLUDE_DIRS = {"venv", ".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache"}
-    # File patterns to exclude
-    EXCLUDE_FILES = {".DS_Store", "*.egg-info", "*.pyc", "*.pyo"}
+# Cap on how many example paths to keep per skip reason, so the manifest stays
+# readable on a large repository while still being concrete.
+MAX_MANIFEST_EXAMPLES = 10
 
-    for root, dirs, files in os.walk(path):
-        # Prune excluded directories
+
+def scan_directory_with_coverage(path: str) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+    """Discover analyzable files and record everything that was not analyzed.
+
+    Returns (files, coverage). Coverage exists so a scan can state its own
+    limits: silently ignoring a file class makes a clean report indistinguishable
+    from an unexamined one.
+    """
+    files_to_analyze: List[Dict[str, str]] = []
+    unsupported: Dict[str, int] = {}
+    unsupported_examples: Dict[str, List[str]] = {}
+    excluded_dirs: Dict[str, int] = {}
+    unreadable: List[Dict[str, str]] = []
+    root_path = Path(path)
+
+    for root, dirs, files in os.walk(root_path):
+        pruned = [d for d in dirs if d in EXCLUDE_DIRS]
+        for d in pruned:
+            excluded_dirs[d] = excluded_dirs.get(d, 0) + 1
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
         for file in files:
             file_path = Path(root) / file
-            # Exclude files by name or pattern
             if file in EXCLUDE_FILES or any(file_path.match(pattern) for pattern in EXCLUDE_FILES):
                 continue
-            if file_path.suffix in extensions:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    files_to_analyze.append({
-                        "path": str(file_path.relative_to(path)),
-                        "content": content,
-                        "type": file_path.suffix[1:],  # Remove the dot
-                        "size": os.path.getsize(file_path)
-                    })
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Could not read {file_path}: {e}[/yellow]")
-    return files_to_analyze
+
+            try:
+                rel_path = str(file_path.relative_to(root_path))
+            except ValueError:
+                rel_path = str(file_path)
+
+            if file_path.suffix not in SUPPORTED_EXTENSIONS:
+                ext = file_path.suffix or "(no extension)"
+                unsupported[ext] = unsupported.get(ext, 0) + 1
+                examples = unsupported_examples.setdefault(ext, [])
+                if len(examples) < MAX_MANIFEST_EXAMPLES:
+                    examples.append(rel_path)
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                files_to_analyze.append({
+                    "path": rel_path,
+                    "content": content,
+                    "type": file_path.suffix[1:],
+                    "size": os.path.getsize(file_path)
+                })
+            except Exception as e:
+                unreadable.append({"path": rel_path, "reason": str(e)})
+                console.print(f"[yellow]Warning: Could not read {file_path}: {e}[/yellow]")
+
+    coverage = {
+        "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+        "discovered": len(files_to_analyze),
+        "skipped_unsupported_extension": dict(sorted(unsupported.items(), key=lambda kv: -kv[1])),
+        "skipped_unsupported_examples": unsupported_examples,
+        "skipped_excluded_directories": dict(sorted(excluded_dirs.items(), key=lambda kv: -kv[1])),
+        "unreadable": unreadable,
+    }
+    return files_to_analyze, coverage
+
+
+def scan_directory(path: str) -> List[Dict[str, str]]:
+    """Scan directory for files to analyze, excluding common junk folders/files."""
+    files, _ = scan_directory_with_coverage(path)
+    return files
 
 
 def find_clausiignore_file(project_path: str) -> Optional[Path]:
@@ -87,10 +137,14 @@ def parse_clausiignore_file(clausiignore_path: Path) -> Optional[Any]:
         return None
 
 
-def filter_ignored_files(files: List[Dict[str, str]], project_path: str, ignore_patterns: Optional[List[str]] = None) -> List[Dict[str, str]]:
-    """Filter out files that match ignore patterns."""
+def filter_ignored_files_with_manifest(
+    files: List[Dict[str, str]], project_path: str,
+    ignore_patterns: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Filter ignored files, also returning what was ignored and by which rule."""
+    ignored_manifest: List[Dict[str, str]] = []
     if not files:
-        return files
+        return files, ignored_manifest
 
     # Find .clausiignore file
     clausiignore_path = find_clausiignore_file(project_path)
@@ -112,7 +166,7 @@ def filter_ignored_files(files: List[Dict[str, str]], project_path: str, ignore_
             console.print(f"[yellow]Warning: Could not parse command-line ignore patterns: {e}[/yellow]")
 
     if not ignore_spec and not cmd_ignore_spec:
-        return files
+        return files, ignored_manifest
 
     project_path_obj = Path(project_path).resolve()
     filtered_files = []
@@ -126,10 +180,12 @@ def filter_ignored_files(files: List[Dict[str, str]], project_path: str, ignore_
 
         if ignore_spec and ignore_spec.match_file(str(file_path)):
             should_ignore = True
+            ignored_manifest.append({"path": str(file_path), "rule": ".clausiignore"})
             console.print(f"[dim]Ignoring {file_path} (matches .clausiignore)[/dim]")
 
         if cmd_ignore_spec and cmd_ignore_spec.match_file(str(file_path)):
             should_ignore = True
+            ignored_manifest.append({"path": str(file_path), "rule": "--ignore pattern"})
             console.print(f"[dim]Ignoring {file_path} (matches command-line pattern)[/dim]")
 
         if not should_ignore:
@@ -139,4 +195,11 @@ def filter_ignored_files(files: List[Dict[str, str]], project_path: str, ignore_
     if ignored_count > 0:
         console.print(f"[green]Ignored {ignored_count} files based on .clausiignore patterns[/green]")
 
-    return filtered_files
+    return filtered_files, ignored_manifest
+
+
+def filter_ignored_files(files: List[Dict[str, str]], project_path: str,
+                         ignore_patterns: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """Filter out files that match ignore patterns."""
+    filtered, _ = filter_ignored_files_with_manifest(files, project_path, ignore_patterns)
+    return filtered

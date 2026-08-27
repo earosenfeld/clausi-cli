@@ -847,3 +847,93 @@ class TestConcurrentScanning:
         assert stats["total_files"] == 6, f"6 files reported as {stats['total_files']} lookups"
         assert stats["cache_hits"] == 5
         assert stats["cache_misses"] == 1
+
+
+class TestScanCoverageManifest:
+    """A scan must disclose what it did not examine.
+
+    Without this, a clean report is indistinguishable from an unexamined one -
+    the difference between "inspected and compliant" and "never read".
+    """
+
+    def _project(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("def f():\n    return 1\n")
+        (tmp_path / "src" / "ui.tsx").write_text("export const A = () => <div/>;\n")
+        (tmp_path / "schema.sql").write_text("CREATE TABLE t (ssn TEXT);\n")
+        (tmp_path / "infra.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "dep.js").write_text("module.exports = 1;\n")
+        return tmp_path
+
+    def test_unsupported_file_types_are_reported_not_dropped(self, tmp_path):
+        from clausi.core.scanner import scan_directory_with_coverage
+        files, coverage = scan_directory_with_coverage(str(self._project(tmp_path)))
+
+        assert {f["path"].replace("\\", "/") for f in files} == {"src/app.py"}
+        skipped = coverage["skipped_unsupported_extension"]
+        for ext in (".tsx", ".sql", ".tf"):
+            assert skipped.get(ext) == 1, f"{ext} not reported as skipped"
+        assert "src/ui.tsx" in [
+            p.replace("\\", "/") for p in coverage["skipped_unsupported_examples"][".tsx"]
+        ]
+
+    def test_excluded_directories_are_reported(self, tmp_path):
+        from clausi.core.scanner import scan_directory_with_coverage
+        _, coverage = scan_directory_with_coverage(str(self._project(tmp_path)))
+        assert coverage["skipped_excluded_directories"].get("node_modules") == 1
+
+    def test_clausi_control_files_are_not_listed_as_unsupported(self, tmp_path):
+        from clausi.core.scanner import scan_directory_with_coverage
+        p = self._project(tmp_path)
+        (p / ".clausiignore").write_text("infra/\n")
+        _, coverage = scan_directory_with_coverage(str(p))
+        examples = coverage["skipped_unsupported_examples"]
+        assert not any(
+            ".clausiignore" in path for paths in examples.values() for path in paths
+        )
+
+    def test_ignored_files_record_the_rule_that_dropped_them(self, tmp_path):
+        from clausi.core.scanner import filter_ignored_files_with_manifest
+        (tmp_path / ".clausiignore").write_text("secret/\n")
+        files = [{"path": "keep.py", "content": "x"}, {"path": "secret/k.py", "content": "y"}]
+        kept, ignored = filter_ignored_files_with_manifest(files, str(tmp_path))
+        assert [f["path"] for f in kept] == ["keep.py"]
+        assert len(ignored) == 1
+        assert ignored[0]["rule"] == ".clausiignore"
+
+    def test_truncated_files_are_reported(self, tmp_path):
+        from clausi.core.cache import LocalCache
+        from clausi.core.compliance_analyzer import MAX_FILE_CHARS, run_scan
+
+        class Provider:
+            name, model = "fake", "fake-1"
+
+            def analyze_code(self, regulation, clauses, file_path, code):
+                assert "[TRUNCATED]" in code
+                return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
+
+            def estimate_cost(self, p, c):
+                return 0.0
+
+        files = [{"path": "big.py", "content": "x" * (MAX_FILE_CHARS + 5000)}]
+        result = run_scan(files, "EU-AIA", [], Provider(), LocalCache(cache_dir=tmp_path))
+
+        assert len(result["truncated"]) == 1
+        assert result["truncated"][0]["original_chars"] == MAX_FILE_CHARS + 5000
+        assert result["truncated"][0]["analyzed_chars"] == MAX_FILE_CHARS
+
+    def test_coverage_section_warns_against_reading_silence_as_compliance(self):
+        from clausi.core.markdown_report import MarkdownGenerator
+        md = MarkdownGenerator().generate_findings_md(
+            findings=[], project_name="demo", regulation="EU AI Act",
+            audit_meta={
+                "coverage": {"skipped_unsupported_extension": {".tf": 2}},
+                "truncated_files": [
+                    {"path": "big.py", "original_chars": 20000, "analyzed_chars": 8000}
+                ],
+            },
+        )
+        assert "Coverage and Limits" in md
+        assert "does not indicate compliance" in md
+        assert "big.py" in md

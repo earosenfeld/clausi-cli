@@ -317,7 +317,7 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[
 
     with create_enhanced_progress_bar("Scanning project files...") as progress:
         task = progress.add_task("Scanning project files...", total=None)
-        discovered_files = scanner.scan_directory(abs_path)
+        discovered_files, coverage = scanner.scan_directory_with_coverage(abs_path)
         progress.update(task, completed=True)
 
     if not discovered_files:
@@ -327,7 +327,9 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[
     console.print(f"Found {len(discovered_files)} files to analyze")
 
     ignore_list = list(ignore) if ignore else None
-    files = scanner.filter_ignored_files(discovered_files, abs_path, ignore_list)
+    files, ignored_manifest = scanner.filter_ignored_files_with_manifest(
+        discovered_files, abs_path, ignore_list
+    )
 
     if not files:
         console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
@@ -347,8 +349,76 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[
         "total_bytes": sum(int(file_data.get("size") or 0) for file_data in files),
         "ignore_patterns": list(ignore or ()),
         "clausiignore": str(ignore_file) if ignore_file else "Not present",
+        "coverage": coverage,
+        "ignored_files": ignored_manifest,
     }
+    _print_coverage_summary(coverage, ignored_manifest)
     return files, scope_meta
+
+
+def _save_scan_manifest(output_dir: Path, audit_meta: Dict[str, Any],
+                        result: Dict[str, Any]) -> None:
+    """Write scan_manifest.json: exactly what was and was not examined.
+
+    A compliance report is only as meaningful as its coverage. This records the
+    files that were skipped, ignored, unreadable, truncated, or failed, so a
+    reader can never mistake "not looked at" for "looked at and clean".
+    """
+    coverage = audit_meta.get("coverage") or {}
+    manifest = {
+        "generated": audit_meta.get("timestamp"),
+        "scan_command": audit_meta.get("scan_command"),
+        "analyzed": {
+            "file_count": audit_meta.get("files_analyzed"),
+            "file_types": audit_meta.get("file_types"),
+            "total_bytes": audit_meta.get("total_bytes"),
+            "max_chars_per_file": compliance_analyzer.MAX_FILE_CHARS,
+        },
+        "not_analyzed": {
+            "unsupported_extension": coverage.get("skipped_unsupported_extension", {}),
+            "unsupported_examples": coverage.get("skipped_unsupported_examples", {}),
+            "excluded_directories": coverage.get("skipped_excluded_directories", {}),
+            "ignored_by_rule": audit_meta.get("ignored_files", []),
+            "unreadable": coverage.get("unreadable", []),
+            "failed_during_analysis": result.get("errors", []),
+        },
+        "partially_analyzed": {
+            "truncated": result.get("truncated", []),
+        },
+        "supported_extensions": coverage.get("supported_extensions", []),
+        "caveat": (
+            "Findings cover only the files listed under 'analyzed', and only the "
+            "first max_chars_per_file characters of each. Absence of a finding for "
+            "anything listed under 'not_analyzed' or beyond that limit means it was "
+            "not examined, not that it is compliant."
+        ),
+    }
+    try:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(output_dir / "scan_manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+    except OSError as e:
+        console.print(f"[yellow]Warning: could not write scan manifest: {e}[/yellow]")
+
+
+def _print_coverage_summary(coverage: Dict[str, Any], ignored: List[Dict[str, str]]) -> None:
+    """Tell the user up front what will NOT be looked at.
+
+    Without this, a clean report is indistinguishable from an unexamined one.
+    """
+    unsupported = coverage.get("skipped_unsupported_extension") or {}
+    skipped_total = sum(unsupported.values())
+    if skipped_total:
+        top = ", ".join(f"{ext} ({n})" for ext, n in list(unsupported.items())[:5])
+        console.print(
+            f"[yellow]Not analyzed: {skipped_total} file(s) of unsupported types - {top}[/yellow]"
+        )
+    if ignored:
+        console.print(f"[dim]Excluded by ignore rules: {len(ignored)} file(s)[/dim]")
+    unreadable = coverage.get("unreadable") or []
+    if unreadable:
+        console.print(f"[yellow]Unreadable: {len(unreadable)} file(s)[/yellow]")
 
 
 @click.group(invoke_without_command=True)
@@ -700,7 +770,9 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             "resolved_findings": lifecycle["resolved_findings"],
             "comparison_baseline": lifecycle["is_baseline"],
             "regulation_pack_sha256": regulation_pack_hash(reg_data),
+            "truncated_files": result.get("truncated", []),
         }
+        _save_scan_manifest(reg_output_dir, audit_meta, result)
         MarkdownGenerator().save_all_reports(
             findings=result["findings"],
             project_name=Path(abs_path).name,

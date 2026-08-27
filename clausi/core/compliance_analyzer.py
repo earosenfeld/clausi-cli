@@ -125,6 +125,9 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
     file_path = file_data["path"]
     content = file_data["content"]
     if len(content) > MAX_FILE_CHARS:
+        # Record the loss. A truncated file yields findings for only the first
+        # MAX_FILE_CHARS, so "no finding" past the cut means "not examined".
+        file_data["truncated_from"] = len(content)
         content = content[:MAX_FILE_CHARS] + "\n... [TRUNCATED] ..."
 
     cache_key = cache.generate_cache_key(
@@ -236,9 +239,20 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
         "model": provider.model,
     }
 
+    truncated = [
+        {
+            "path": fd["path"],
+            "original_chars": fd["truncated_from"],
+            "analyzed_chars": MAX_FILE_CHARS,
+        }
+        for fd in files
+        if fd.get("truncated_from")
+    ]
+
     return {
         "findings": all_findings,
         "token_usage": token_usage,
         "cache_stats": cache.stats(),
         "errors": errors,
+        "truncated": truncated,
     }
