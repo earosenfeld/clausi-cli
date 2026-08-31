@@ -497,6 +497,7 @@ class PDFReportGenerator:
             Paragraph("Risk-rating method", self.styles["h2"]),
             self._risk_methodology(),
         ])
+        story.extend(self._scan_coverage_block(audit_meta))
 
         story.append(PageBreak())
         story.extend([
@@ -1124,6 +1125,87 @@ class PDFReportGenerator:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ]))
         return table
+
+    def _scan_coverage_block(self, audit_meta: Dict[str, Any]) -> List[Any]:
+        """What this scan did not examine.
+
+        The report is only as strong as its coverage, and this is the artifact
+        an assessor actually reads - so the exclusions belong here, not only in
+        scan_manifest.json. Absence of a finding for anything listed below means
+        it was not examined, which is not the same as compliant.
+        """
+        coverage = audit_meta.get("coverage") or {}
+        unsupported = coverage.get("skipped_unsupported_extension") or {}
+        excluded_dirs = coverage.get("skipped_excluded_directories") or {}
+        unreadable = coverage.get("unreadable") or []
+        ignored = audit_meta.get("ignored_files") or []
+        truncated = audit_meta.get("truncated_files") or []
+        failed = audit_meta.get("failed_files") or []
+
+        rows = []
+        if unsupported:
+            total = sum(unsupported.values())
+            top = ", ".join(f"{ext} ({n})" for ext, n in list(unsupported.items())[:6])
+            rows.append(("Unsupported file types", f"{total} file(s) not read - {top}"))
+        if excluded_dirs:
+            total = sum(excluded_dirs.values())
+            top = ", ".join(f"{name}" for name in list(excluded_dirs)[:6])
+            rows.append((
+                "Excluded directories",
+                f"{total} directory(ies) skipped as dependency, build, or cache output - {top}",
+            ))
+        if ignored:
+            rows.append((
+                "Excluded by ignore rules",
+                f"{len(ignored)} file(s) excluded by .clausiignore or --ignore",
+            ))
+        if unreadable:
+            rows.append(("Could not be read", f"{len(unreadable)} file(s) failed to open"))
+        if truncated:
+            rows.append((
+                "Partially examined",
+                f"{len(truncated)} file(s) exceeded the per-file character limit; only the "
+                "beginning of each was analyzed",
+            ))
+        if failed:
+            rows.append((
+                "Failed during analysis",
+                f"{len(failed)} file(s) returned an error from the AI provider and produced "
+                "no findings",
+            ))
+
+        if not rows:
+            return []
+
+        table_rows = [
+            [Paragraph(_safe(label), self.styles["small_bold"]),
+             Paragraph(_safe(detail), self.styles["table_cell"])]
+            for label, detail in rows
+        ]
+        table = Table(table_rows, colWidths=[45 * mm, CONTENT_WIDTH - 45 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), SLATE_100),
+            ("BOX", (0, 0), (-1, -1), 0.6, SLATE_200),
+            ("INNERGRID", (0, 0), (-1, -1), 0.4, SLATE_200),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return [
+            Spacer(1, 6 * mm),
+            Paragraph("Scan coverage and exclusions", self.styles["h2"]),
+            Paragraph(
+                "This assessment covers only the files recorded as analyzed. The items below "
+                "were not examined, or were examined only in part. Absence of a finding for "
+                "any of them does not indicate compliance. The complete file-level record is "
+                "in scan_manifest.json alongside this report.",
+                self.styles["body"],
+            ),
+            Spacer(1, 3 * mm),
+            table,
+        ]
 
     def _risk_methodology(self) -> Table:
         rows = [

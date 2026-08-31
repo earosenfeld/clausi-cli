@@ -5,10 +5,13 @@ backend involved. Prompt/response contract matches the original hosted
 service so cached results and report generation stay compatible.
 """
 
+import hashlib
 import json
+import random
 import re
 import shutil
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -99,6 +102,29 @@ def build_prompt(regulation: str, clauses: List[Dict[str, Any]], file_path: str,
     )
 
 
+def analysis_fingerprint(clauses: List[Dict[str, Any]]) -> str:
+    """Hash everything that shapes an analysis besides the file content itself.
+
+    The cache is keyed on file content, regulation name, provider, and model.
+    None of those change when we edit PROMPT_TEMPLATE or when a regulation pack
+    revises a clause's wording - so without this component, an existing user
+    would keep being served findings produced by the previous prompt against
+    the previous clause text, silently, until the entry expired. Since the
+    whole point of maintained regulation packs is that the legal content
+    changes, that staleness is a correctness bug, not a performance detail.
+
+    Changing this value invalidates cached entries by design.
+    """
+    payload = {
+        "prompt": PROMPT_TEMPLATE,
+        "clauses": sorted(
+            f"{c.get('id', '')}|{clause_display_text(c)}" for c in (clauses or [])
+        ),
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
 def extract_json_object(text: str) -> Dict[str, Any]:
     """Parse a JSON object out of a model response.
 
@@ -139,6 +165,82 @@ def estimate_tokens(text: str) -> int:
 
 class AIProviderError(Exception):
     """Raised when an AI provider call fails."""
+
+
+# Transient-failure handling. A scan runs MAX_WORKERS files concurrently against
+# one account, so rate limits are the expected case on any real repository, not
+# an edge case. Without retries each 429 permanently loses a file: the user pays
+# for the rest of the scan and gets a report with a hole in it.
+# Findings for one file, as JSON. A response cut off at the limit is invalid
+# JSON, so an under-sized budget shows up as a parse failure rather than as the
+# budget problem it actually is - hence the explicit stop_reason check below.
+MAX_ANALYSIS_TOKENS = 8192
+
+MAX_ATTEMPTS = 4
+BASE_RETRY_DELAY = 1.0
+MAX_RETRY_DELAY = 30.0
+RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+RETRYABLE_NAME_HINTS = (
+    "ratelimit", "apiconnection", "apitimeout", "internalserver",
+    "overloaded", "serviceunavailable",
+)
+
+
+def _retry_after_seconds(exc: Exception) -> Optional[float]:
+    """Honour a server-supplied Retry-After header when there is one."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    try:
+        value = headers.get("retry-after")
+    except AttributeError:
+        return None
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def is_retryable(exc: Exception) -> bool:
+    """Whether a provider exception is worth trying again.
+
+    Matched structurally (status code, then class name) rather than by
+    importing each SDK's exception types, so this stays correct across SDK
+    versions and works for providers whose exceptions we never import.
+    """
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if isinstance(status, int) and status in RETRYABLE_STATUS:
+        return True
+    name = type(exc).__name__.lower()
+    return any(hint in name for hint in RETRYABLE_NAME_HINTS)
+
+
+def call_with_retries(operation, description: str, sleep=time.sleep):
+    """Run a provider call, retrying transient failures with backoff + jitter.
+
+    Jitter matters here specifically: the whole thread pool tends to get rate
+    limited at the same instant, and un-jittered backoff would march every
+    worker into the next retry simultaneously.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return operation()
+        except Exception as e:  # noqa: BLE001 - re-raised below when terminal
+            last_exc = e
+            if attempt == MAX_ATTEMPTS or not is_retryable(e):
+                break
+            delay = _retry_after_seconds(e)
+            if delay is None:
+                delay = min(BASE_RETRY_DELAY * (2 ** (attempt - 1)), MAX_RETRY_DELAY)
+                delay += random.uniform(0, delay / 2)
+            sleep(delay)
+    raise AIProviderError(
+        f"{description} failed after {MAX_ATTEMPTS} attempt(s): {last_exc}"
+    ) from last_exc
 
 
 class AIProvider(ABC):
@@ -197,18 +299,18 @@ class ClaudeProvider(AIProvider):
 
     def analyze_code(self, regulation, clauses, file_path, code):
         prompt = build_prompt(regulation, clauses, file_path, code)
-        try:
-            # No temperature: the Anthropic SDK removed sampling parameters from
-            # messages.create() in 1.0, and current models reject them with a 400.
-            response = self._client.messages.create(
+        # No temperature: the Anthropic SDK removed sampling parameters from
+        # messages.create() in 1.0, and current models reject them with a 400.
+        response = call_with_retries(
+            lambda: self._client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_ANALYSIS_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
-            )
-        except Exception as e:
-            raise AIProviderError(f"Claude API error: {e}") from e
+            ),
+            f"Claude analysis of {file_path}",
+        )
 
-        text = response.content[0].text
+        text = self._response_text(response, file_path)
         try:
             parsed = extract_json_object(text)
         except (json.JSONDecodeError, IndexError, ValueError) as e:
@@ -221,22 +323,43 @@ class ClaudeProvider(AIProvider):
             "completion_tokens": getattr(usage, "output_tokens", estimate_tokens(text)),
         }
 
+    @staticmethod
+    def _response_text(response, description: str) -> str:
+        """Pull the text out of a Messages response, diagnosing truncation.
+
+        Reported separately from a parse error because the fixes differ: a
+        truncated response means the token budget was too small, not that the
+        model ignored the JSON instruction.
+        """
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            raise AIProviderError(
+                f"Claude response for {description} hit the {MAX_ANALYSIS_TOKENS}-token "
+                "output limit and was cut off mid-JSON. The file likely produced more "
+                "findings than fit in one response."
+            )
+        blocks = getattr(response, "content", None) or []
+        for block in blocks:
+            text = getattr(block, "text", None)
+            if text:
+                return text
+        raise AIProviderError(f"Claude returned no text content for {description}")
+
     def estimate_cost(self, input_tokens, output_tokens):
         in_rate, out_rate = self.PRICING.get(self.model, self.PRICING[self.DEFAULT_MODEL])
         return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
 
     def generate_text(self, system_prompt, user_prompt):
-        try:
-            response = self._client.messages.create(
+        response = call_with_retries(
+            lambda: self._client.messages.create(
                 model=self.model,
                 max_tokens=8192,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-            )
-        except Exception as e:
-            raise AIProviderError(f"Claude API error: {e}") from e
+            ),
+            "Claude text generation",
+        )
 
-        text = response.content[0].text
+        text = self._response_text(response, "generated document")
         usage = getattr(response, "usage", None)
         return {
             "text": text,
@@ -263,21 +386,26 @@ class OpenAIProvider(AIProvider):
 
     def analyze_code(self, regulation, clauses, file_path, code):
         prompt = build_prompt(regulation, clauses, file_path, code)
-        try:
-            response = self._client.chat.completions.create(
+        response = call_with_retries(
+            lambda: self._client.chat.completions.create(
                 model=self.model,
                 response_format={"type": "json_object"},
-                temperature=0.1,
-                max_tokens=4096,
+                max_completion_tokens=MAX_ANALYSIS_TOKENS,
                 messages=[
                     {"role": "system", "content": "You are a compliance auditor. Respond only with JSON."},
                     {"role": "user", "content": prompt},
                 ],
-            )
-        except Exception as e:
-            raise AIProviderError(f"OpenAI API error: {e}") from e
+            ),
+            f"OpenAI analysis of {file_path}",
+        )
 
-        text = response.choices[0].message.content
+        choice = response.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise AIProviderError(
+                f"OpenAI response for {file_path} hit the {MAX_ANALYSIS_TOKENS}-token "
+                "output limit and was cut off mid-JSON."
+            )
+        text = choice.message.content
         try:
             parsed = extract_json_object(text)
         except (json.JSONDecodeError, ValueError) as e:
@@ -295,18 +423,17 @@ class OpenAIProvider(AIProvider):
         return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
 
     def generate_text(self, system_prompt, user_prompt):
-        try:
-            response = self._client.chat.completions.create(
+        response = call_with_retries(
+            lambda: self._client.chat.completions.create(
                 model=self.model,
-                temperature=0.2,
-                max_tokens=4096,
+                max_completion_tokens=MAX_ANALYSIS_TOKENS,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-            )
-        except Exception as e:
-            raise AIProviderError(f"OpenAI API error: {e}") from e
+            ),
+            "OpenAI text generation",
+        )
 
         text = response.choices[0].message.content
         usage = getattr(response, "usage", None)
@@ -388,15 +515,28 @@ class LocalAgentProvider(AIProvider):
             raise AIProviderError(f"{self.friendly_name} returned no output")
         return output
 
+    # An agent CLI occasionally answers with prose or an empty turn instead of
+    # the requested JSON - observed against both files of a two-file scan that
+    # then succeeded unchanged on a re-run. One retry costs nothing here (the
+    # user's plan already covers these calls) and turns a lost file into a
+    # completed one.
+    PARSE_ATTEMPTS = 2
+
     def analyze_code(self, regulation, clauses, file_path, code):
         prompt = build_prompt(regulation, clauses, file_path, code)
-        text = self._run(prompt)
-        try:
-            parsed = extract_json_object(text)
-        except (json.JSONDecodeError, ValueError) as e:
+        last_error = None
+        for attempt in range(self.PARSE_ATTEMPTS):
+            text = self._run(prompt)
+            try:
+                parsed = extract_json_object(text)
+                break
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+        else:
             raise AIProviderError(
-                f"Could not parse {self.friendly_name} response as JSON: {e}"
-            ) from e
+                f"Could not parse {self.friendly_name} response as JSON after "
+                f"{self.PARSE_ATTEMPTS} attempt(s): {last_error}"
+            ) from last_error
         return {
             "findings": parsed.get("findings", []),
             "prompt_tokens": estimate_tokens(prompt),

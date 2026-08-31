@@ -148,8 +148,9 @@ class MarkdownGenerator:
         ignored = audit_meta.get("ignored_files") or []
         unreadable = coverage.get("unreadable") or []
         truncated = audit_meta.get("truncated_files") or []
+        failed = audit_meta.get("failed_files") or []
 
-        if not (unsupported or ignored or unreadable or truncated):
+        if not (unsupported or ignored or unreadable or truncated or failed):
             return []
 
         lines = ["## Coverage and Limits", "",
@@ -164,6 +165,13 @@ class MarkdownGenerator:
             lines += [f"- **Excluded by ignore rules:** {len(ignored)} file(s)"]
         if unreadable:
             lines += [f"- **Could not be read:** {len(unreadable)} file(s)"]
+        if failed:
+            lines += [f"- **Failed during analysis:** {len(failed)} file(s) were sent for "
+                      "analysis but returned an error, so they produced no findings"]
+            for err in failed[:10]:
+                lines.append(f"  - {err}")
+            if len(failed) > 10:
+                lines.append(f"  - ...and {len(failed) - 10} more")
         if truncated:
             lines += [f"- **Truncated before analysis:** {len(truncated)} file(s) exceeded the "
                       "per-file limit; only the beginning of each was examined"]

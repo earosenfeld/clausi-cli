@@ -5,13 +5,46 @@ with on-disk caching, and post-processes findings for report generation.
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
-from clausi.core.ai_provider import AIProvider, AIProviderError
+from clausi.core.ai_provider import AIProvider, AIProviderError, analysis_fingerprint
 from clausi.core.cache import LocalCache
 
 MAX_FILE_CHARS = 8000
 MAX_WORKERS = 8
 
-SEVERITY_MAP = {"warning": "medium"}
+# The canonical severity ladder, low to high. Everything downstream - report
+# grouping, the --min-severity filter, risk scoring - assumes a value from this
+# list, so normalization happens once, at the provider boundary.
+SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
+
+# A model returns whatever word it likes. The prompt asks for lowercase
+# severities but shows "High|Medium|Low" for finding_certainty a few lines
+# later, so capitalized values arrive routinely. Anything unrecognized becomes
+# UNKNOWN_SEVERITY rather than raising: the scan is already paid for by the
+# time findings are post-processed, and one odd word must not cost the user
+# the whole run.
+SEVERITY_MAP = {
+    "warning": "medium",
+    "moderate": "medium",
+    "informational": "info",
+    "information": "info",
+    "note": "info",
+    "minor": "low",
+    "major": "high",
+    "severe": "critical",
+    "blocker": "critical",
+    "blocking": "critical",
+}
+UNKNOWN_SEVERITY = "medium"
+
+
+def normalize_severity(raw: Any) -> str:
+    """Map a provider's severity word onto SEVERITY_ORDER. Never raises."""
+    if raw is None:
+        return UNKNOWN_SEVERITY
+    value = str(raw).strip().lower()
+    value = SEVERITY_MAP.get(value, value)
+    return value if value in SEVERITY_ORDER else UNKNOWN_SEVERITY
+
 
 # Clause-prefix families treated as architecture/governance-level - findings
 # against them get their remediation effort bumped up (never down).
@@ -42,9 +75,12 @@ def _confidence_to_certainty(confidence: float) -> str:
 
 def _remap_finding(raw: Dict[str, Any], file_path: str) -> Dict[str, Any]:
     """Map a provider's raw JSON finding into the report-generator schema."""
-    severity = raw.get("severity", "medium")
-    severity = SEVERITY_MAP.get(severity, severity)
-    confidence = float(raw.get("confidence", 0.5))
+    reported_severity = raw.get("severity", "medium")
+    severity = normalize_severity(reported_severity)
+    try:
+        confidence = float(raw.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
     line_start = raw.get("line_start")
     line_end = raw.get("line_end")
     location = f"lines {line_start}-{line_end}" if line_start else "N/A"
@@ -60,6 +96,11 @@ def _remap_finding(raw: Dict[str, Any], file_path: str) -> Dict[str, Any]:
         "clause_id": raw.get("clause_id", ""),
         "violation": True,
         "severity": severity,
+        # Kept when we had to reinterpret the model's word, so a reader can see
+        # what it actually said.
+        "severity_reported": (
+            str(reported_severity) if str(reported_severity) != severity else ""
+        ),
         "location": location,
         "explanation": raw.get("violation", ""),
         "statement": raw.get("clause_text", ""),
@@ -88,7 +129,8 @@ def apply_effort_bumping(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     for f in findings:
         if f.get("clause_id") == "TOKEN-USAGE":
             continue
-        counts_by_clause[f["clause_id"]] = counts_by_clause.get(f["clause_id"], 0) + 1
+        clause_id = f.get("clause_id", "")
+        counts_by_clause[clause_id] = counts_by_clause.get(clause_id, 0) + 1
 
     for f in findings:
         clause_id = f.get("clause_id", "")
@@ -131,7 +173,8 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         content = content[:MAX_FILE_CHARS] + "\n... [TRUNCATED] ..."
 
     cache_key = cache.generate_cache_key(
-        content, regulation, clauses=clause_ids, provider=provider.name, model=provider.model
+        content, regulation, clauses=clause_ids, provider=provider.name,
+        model=provider.model, analysis_fingerprint=analysis_fingerprint(clauses),
     )
 
     def _from_cache(entry):
@@ -217,18 +260,31 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
                 total_cost += cost
             except AIProviderError as e:
                 errors.append(f"{file_data['path']}: {e}")
+            except Exception as e:  # noqa: BLE001 - see below
+                # Every API call in this scan is already paid for by the time a
+                # worker raises. An unanticipated error on one file must cost
+                # that file, not the user's entire run and every other file's
+                # findings with it.
+                errors.append(
+                    f"{file_data['path']}: unexpected {type(e).__name__}: {e}"
+                )
             if on_progress:
                 on_progress(completed, len(files), file_data["path"])
 
-    all_findings = apply_effort_bumping(all_findings)
+    try:
+        all_findings = apply_effort_bumping(all_findings)
+    except Exception as e:  # noqa: BLE001
+        # Effort bumping is an enhancement, not the result. Losing it is a
+        # degraded report; raising here would lose the report entirely.
+        errors.append(f"remediation-effort scoring skipped: {type(e).__name__}: {e}")
 
-    severity_order = ["info", "low", "medium", "warning", "high", "critical"]
-    if min_severity in severity_order:
-        min_idx = severity_order.index(min_severity)
-        all_findings = [
-            f for f in all_findings
-            if severity_order.index(f.get("severity", "info")) >= min_idx
-        ]
+    if min_severity in SEVERITY_ORDER:
+        min_idx = SEVERITY_ORDER.index(min_severity)
+
+        def _rank(finding):
+            return SEVERITY_ORDER.index(normalize_severity(finding.get("severity")))
+
+        all_findings = [f for f in all_findings if _rank(f) >= min_idx]
 
     token_usage = {
         "prompt_tokens": total_prompt_tokens,

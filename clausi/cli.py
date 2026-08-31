@@ -728,22 +728,31 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     total_completion_tokens = 0
     total_cost = 0.0
     all_errors: List[str] = []
+    regulation_failures: List[str] = []
 
     for reg_code in regulations:
         reg_data = regulation_data[reg_code]
         console.print(f"\n{emoji('search')} Scanning against [bold]{reg_data['name']}[/bold]...")
 
-        with console.status(f"Analyzing {len(files)} file(s)..."):
-            result = compliance_analyzer.run_scan(
-                files=files,
-                regulation=reg_data["name"],
-                clauses=reg_data["clauses"],
-                provider=ai_provider,
-                cache=cache,
-                clauses_include=clauses_include,
-                clauses_exclude=clauses_exclude,
-                min_severity=min_severity,
-            )
+        try:
+            with console.status(f"Analyzing {len(files)} file(s)..."):
+                result = compliance_analyzer.run_scan(
+                    files=files,
+                    regulation=reg_data["name"],
+                    clauses=reg_data["clauses"],
+                    provider=ai_provider,
+                    cache=cache,
+                    clauses_include=clauses_include,
+                    clauses_exclude=clauses_exclude,
+                    min_severity=min_severity,
+                )
+        except Exception as e:  # noqa: BLE001
+            # One regulation failing must not discard the regulations that
+            # already scanned successfully - their reports are written inside
+            # this loop and the API spend is not refundable.
+            console.print(f"[red]{emoji('cross')} {reg_code} scan failed: {e}[/red]")
+            regulation_failures.append(f"{reg_code}: {e}")
+            continue
 
         for f in result["findings"]:
             f["regulation"] = reg_code
@@ -752,56 +761,76 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         total_cost += result["token_usage"]["cost"]
         all_errors.extend(result.get("errors", []))
 
-        reg_output_dir = output_path / reg_code if len(regulations) > 1 else output_path
-        lifecycle = prepare_findings(
-            findings=result["findings"],
-            regulation=reg_code,
-            project_path=Path(abs_path),
-            output_dir=reg_output_dir,
-        )
-        all_findings.extend(result["findings"])
-        audit_meta = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "provider": provider,
-            "model": model,
-            "total_tokens": result["token_usage"]["total_tokens"],
-            "cost": result["token_usage"]["cost"],
-            "files_scanned": len(files),
-            **scope_meta,
-            "clauses_include": clauses_include,
-            "clauses_exclude": clauses_exclude,
-            "scan_command": shlex.join(sys.argv),
-            "change_summary": lifecycle["change_summary"],
-            "resolved_ids": lifecycle["resolved_ids"],
-            "resolved_findings": lifecycle["resolved_findings"],
-            "comparison_baseline": lifecycle["is_baseline"],
-            "regulation_pack_sha256": regulation_pack_hash(reg_data),
-            "truncated_files": result.get("truncated", []),
-        }
-        _save_scan_manifest(reg_output_dir, audit_meta, result)
-        MarkdownGenerator().save_all_reports(
-            findings=result["findings"],
-            project_name=Path(abs_path).name,
-            regulation=reg_data["name"],
-            audit_meta=audit_meta,
-            all_clauses=reg_data["clauses"],
-            output_dir=reg_output_dir,
-            files_scanned=len(files),
-        )
-        PDFReportGenerator().save_report(
-            findings=result["findings"],
-            project_name=Path(abs_path).name,
-            regulation=reg_data["name"],
-            audit_meta=audit_meta,
-            output_dir=reg_output_dir,
-            files_scanned=len(files),
-            all_clauses=reg_data["clauses"],
-            project_path=Path(abs_path),
-            regulation_metadata=reg_data,
-        )
-        save_remediation_register(result["findings"], reg_output_dir)
-        commit_lifecycle(lifecycle)
-        console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
+        try:
+            reg_output_dir = output_path / reg_code if len(regulations) > 1 else output_path
+            lifecycle = prepare_findings(
+                findings=result["findings"],
+                regulation=reg_code,
+                project_path=Path(abs_path),
+                output_dir=reg_output_dir,
+            )
+            all_findings.extend(result["findings"])
+            audit_meta = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "provider": provider,
+                "model": model,
+                "total_tokens": result["token_usage"]["total_tokens"],
+                "cost": result["token_usage"]["cost"],
+                "files_scanned": len(files),
+                **scope_meta,
+                "clauses_include": clauses_include,
+                "clauses_exclude": clauses_exclude,
+                "scan_command": shlex.join(sys.argv),
+                "change_summary": lifecycle["change_summary"],
+                "resolved_ids": lifecycle["resolved_ids"],
+                "resolved_findings": lifecycle["resolved_findings"],
+                "comparison_baseline": lifecycle["is_baseline"],
+                "regulation_pack_sha256": regulation_pack_hash(reg_data),
+                "truncated_files": result.get("truncated", []),
+                # Files that errored mid-scan are part of coverage, not just
+                # console noise: a report that omits them understates what was
+                # never examined.
+                "failed_files": result.get("errors", []),
+            }
+            _save_scan_manifest(reg_output_dir, audit_meta, result)
+            MarkdownGenerator().save_all_reports(
+                findings=result["findings"],
+                project_name=Path(abs_path).name,
+                regulation=reg_data["name"],
+                audit_meta=audit_meta,
+                all_clauses=reg_data["clauses"],
+                output_dir=reg_output_dir,
+                files_scanned=len(files),
+            )
+            PDFReportGenerator().save_report(
+                findings=result["findings"],
+                project_name=Path(abs_path).name,
+                regulation=reg_data["name"],
+                audit_meta=audit_meta,
+                output_dir=reg_output_dir,
+                files_scanned=len(files),
+                all_clauses=reg_data["clauses"],
+                project_path=Path(abs_path),
+                regulation_metadata=reg_data,
+            )
+            save_remediation_register(result["findings"], reg_output_dir)
+            commit_lifecycle(lifecycle)
+            console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
+        except Exception as e:  # noqa: BLE001
+            # The scan succeeded and was paid for. If a report generator fails,
+            # say so loudly and keep the findings that were already collected
+            # rather than exiting on a traceback with nothing to show.
+            console.print(
+                f"[red]{emoji('cross')} {reg_code}: scan completed but report "
+                f"generation failed: {type(e).__name__}: {e}[/red]"
+            )
+            regulation_failures.append(f"{reg_code}: report generation - {e}")
+
+    if regulation_failures:
+        console.print(f"\n[red]{emoji('cross')} {len(regulation_failures)} regulation(s) did not "
+                      "produce complete reports:[/red]")
+        for failure in regulation_failures:
+            console.print(f"  [dim]{failure}[/dim]")
 
     if all_errors:
         console.print(f"\n[yellow]{emoji('warning')} {len(all_errors)} file(s) failed to analyze:[/yellow]")
@@ -859,6 +888,14 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             "[yellow]No findings were produced for those files. This is NOT a "
             "clean result - re-run after resolving the errors above.[/yellow]"
         )
+    elif regulation_failures:
+        # Same reasoning as the branch above: a regulation that never completed
+        # produced no findings because it did not run, not because the code is
+        # clean.
+        console.print(
+            f"\n[red]{emoji('crossmark')} Scan incomplete: "
+            f"{len(regulation_failures)} regulation(s) failed. This is NOT a clean result.[/red]"
+        )
     else:
         console.print(f"\n[green]{emoji('checkmark')} No findings - looks compliant![/green]")
 
@@ -870,6 +907,15 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         stats = cache.stats()
         stats["cost_saved"] = 0.0  # exact $ saved is provider/model-dependent; hit-rate is the useful signal
         display_cache_statistics(stats)
+
+    if regulation_failures and len(regulation_failures) >= len(regulations):
+        # No regulation produced a complete report. Same contract as the
+        # all-files-failed case below: never exit 0 on a scan that did not run.
+        console.print(
+            f"\n[red]Scan failed: no regulation completed. Reports in {output_path} "
+            "are incomplete and must not be treated as evidence.[/red]"
+        )
+        raise SystemExit(2)
 
     if all_errors and len(all_errors) >= len(files):
         # Every file failed: nothing was actually analyzed. Exit non-zero so CI
