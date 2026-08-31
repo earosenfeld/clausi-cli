@@ -17,6 +17,13 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
+# The cache only ever grew. Entries are keyed by content hash, prompt text and
+# regulation-pack contents, so editing a file, updating a pack or shipping a
+# prompt change orphans the old entry permanently - it is unreachable but never
+# expires out of the directory. A working repo scanned regularly accumulates a
+# dead entry per edit, forever, in the user's home directory.
+DEFAULT_MAX_BYTES = 500 * 1024 * 1024
+
 
 def get_cache_dir() -> Path:
     cache_dir = Path.home() / ".clausi" / "cache"
@@ -158,6 +165,63 @@ class LocalCache:
             "cache_misses": self.misses,
             "cache_hit_rate": (self.hits / total) if total else 0.0,
         }
+
+    def prune(self, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, int]:
+        """Drop expired entries, then the oldest entries until under max_bytes.
+
+        Returns {"expired": n, "evicted": n, "bytes_freed": n}. Best-effort by
+        design: a cache that cannot be tidied is not a reason to fail a scan,
+        and a concurrent scan may delete an entry out from under us.
+        """
+        expired = evicted = freed = 0
+        cutoff = time.time() - self.ttl
+        live = []
+
+        for path in self.cache_dir.glob("scan_*.json"):
+            try:
+                size = path.stat().st_size
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                try:
+                    path.unlink()
+                    expired += 1
+                    freed += size
+                except OSError:
+                    pass
+                continue
+            live.append((mtime, size, path))
+
+        # Orphaned temp files from a scan that died mid-write.
+        for path in self.cache_dir.glob(".*.tmp"):
+            with contextlib.suppress(OSError):
+                if path.stat().st_mtime < time.time() - 3600:
+                    freed += path.stat().st_size
+                    path.unlink()
+
+        total = sum(size for _, size, _ in live)
+        if total > max_bytes:
+            # Oldest first: least likely to be the repo the user is working in.
+            for mtime, size, path in sorted(live):
+                if total <= max_bytes:
+                    break
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+                total -= size
+                evicted += 1
+                freed += size
+
+        return {"expired": expired, "evicted": evicted, "bytes_freed": freed}
+
+    def size_bytes(self) -> int:
+        total = 0
+        for path in self.cache_dir.glob("scan_*.json"):
+            with contextlib.suppress(OSError):
+                total += path.stat().st_size
+        return total
 
     def clear(self) -> int:
         """Delete all cached entries. Returns count removed."""

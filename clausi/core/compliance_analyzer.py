@@ -16,7 +16,14 @@ from clausi.core.ai_provider import (
 )
 from clausi.core.cache import LocalCache
 
-MAX_FILE_CHARS = 8000
+# Characters of a file actually sent for analysis. 8,000 (~2k tokens) was set
+# when context windows were small and cut 25 of 86 files on a real repository -
+# one at 44% coverage - which for a compliance scan means "not examined" for the
+# majority of the file. 60,000 (~15k tokens) covers essentially all hand-written
+# source at a cost that is still dominated by the clause text. Files past this
+# are still truncated, and still disclosed as truncated in the manifest and both
+# reports. Override with scan.max_file_chars in ~/.clausi/config.yml.
+MAX_FILE_CHARS = 60000
 MAX_WORKERS = 8
 
 # The canonical severity ladder, low to high. Everything downstream - report
@@ -177,19 +184,47 @@ def select_clauses(clauses: List[Dict[str, Any]],
     return clauses
 
 
-def scoped_content(content: str) -> str:
+VALID_ABSTENTION_REASONS = {
+    "not_applicable", "not_observable_in_code", "insufficient_context",
+}
+
+
+def _remap_not_assessed(raw_entries: Any, file_path: str) -> List[Dict[str, Any]]:
+    """Normalize the model's abstentions.
+
+    A clause the model could not judge is not a clean clause. Silence used to be
+    the only way to express that, and silence is indistinguishable from "no
+    violation found" - which is exactly the false clean result a compliance
+    report must never produce.
+    """
+    entries = []
+    for raw in (raw_entries or []):
+        if not isinstance(raw, dict):
+            continue
+        reason = str(raw.get("reason", "")).strip().lower()
+        entries.append({
+            "file_path": file_path,
+            "clause_id": str(raw.get("clause_id", "")).strip(),
+            "reason": reason if reason in VALID_ABSTENTION_REASONS else "insufficient_context",
+            "explanation": str(raw.get("explanation", "")).strip(),
+        })
+    return entries
+
+
+def scoped_content(content: str, max_file_chars: int = MAX_FILE_CHARS) -> str:
     """The text actually sent for a file - truncation included.
 
     Shared by the estimator and the scan so a quote can never be based on more
     content than the scan will send.
     """
-    if len(content) > MAX_FILE_CHARS:
-        return content[:MAX_FILE_CHARS] + "\n... [TRUNCATED] ..."
+    if len(content) > max_file_chars:
+        return content[:max_file_chars] + "\n... [TRUNCATED] ..."
     return content
 
 
 def estimate_scan(files: List[Dict[str, Any]], regulation: str,
-                   clauses: List[Dict[str, Any]], provider: AIProvider) -> Dict[str, Any]:
+                   clauses: List[Dict[str, Any]], provider: AIProvider,
+                   max_file_chars: int = MAX_FILE_CHARS) -> Dict[str, Any]:
     """Estimate one regulation's scan. Returns per-file and total figures.
 
     Counts what is actually sent: the prompt scaffold for every file plus the
@@ -198,7 +233,9 @@ def estimate_scan(files: List[Dict[str, Any]], regulation: str,
     overhead = prompt_overhead_tokens(regulation, clauses)
     per_file = []
     for file_data in files:
-        input_tokens = overhead + estimate_tokens(scoped_content(file_data["content"]))
+        input_tokens = overhead + estimate_tokens(
+            scoped_content(file_data["content"], max_file_chars)
+        )
         per_file.append({
             "path": file_data["path"],
             "input_tokens": input_tokens,
@@ -262,18 +299,18 @@ class CostBudget:
 def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
                   clauses: List[Dict[str, Any]], clause_ids: Optional[List[str]],
                   file_data: Dict[str, Any], budget: Optional["CostBudget"] = None,
-                  projected_cost: float = 0.0):
+                  projected_cost: float = 0.0, max_file_chars: int = MAX_FILE_CHARS):
     """Analyze a single file, using the cache when possible.
 
     Returns (findings, prompt_tokens, completion_tokens, cost).
     """
     file_path = file_data["path"]
     content = file_data["content"]
-    if len(content) > MAX_FILE_CHARS:
+    if len(content) > max_file_chars:
         # Record the loss. A truncated file yields findings for only the first
-        # MAX_FILE_CHARS, so "no finding" past the cut means "not examined".
+        # max_file_chars, so "no finding" past the cut means "not examined".
         file_data["truncated_from"] = len(content)
-    content = scoped_content(content)
+    content = scoped_content(content, max_file_chars)
 
     cache_key = cache.generate_cache_key(
         content, regulation, clauses=clause_ids, provider=provider.name,
@@ -285,7 +322,8 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         for f in findings:
             f["file_path"] = file_path
             f["cached"] = True
-        return findings, 0, 0, 0.0
+        # Entries written before abstention shipped have no not_assessed key.
+        return findings, 0, 0, 0.0, entry.get("not_assessed") or []
 
     cached = cache.get(cache_key)
     if cached is not None:
@@ -306,7 +344,7 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
             budget.reserve(projected_cost)
 
         try:
-            findings, prompt_tokens, completion_tokens, cost = _analyze_uncached(
+            findings, prompt_tokens, completion_tokens, cost, not_assessed = _analyze_uncached(
                 provider, cache, regulation, clauses, file_path, content, cache_key
             )
         except Exception:
@@ -318,13 +356,14 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
             raise
         if budget is not None:
             budget.record(projected_cost, cost)
-        return findings, prompt_tokens, completion_tokens, cost
+        return findings, prompt_tokens, completion_tokens, cost, not_assessed
 
 
 def _analyze_uncached(provider, cache, regulation, clauses, file_path, content, cache_key):
     """Call the provider and cache the result. Caller holds the key lock."""
     result = provider.analyze_code(regulation, clauses, file_path, content)
     findings = [_remap_finding(raw, file_path) for raw in result["findings"]]
+    not_assessed = _remap_not_assessed(result.get("not_assessed"), file_path)
 
     prompt_tokens = result.get("prompt_tokens", 0)
     completion_tokens = result.get("completion_tokens", 0)
@@ -336,8 +375,8 @@ def _analyze_uncached(provider, cache, regulation, clauses, file_path, content, 
         f["model"] = provider.model
         f["provider"] = provider.name
 
-    cache.set(cache_key, {"findings": findings})
-    return findings, prompt_tokens, completion_tokens, cost
+    cache.set(cache_key, {"findings": findings, "not_assessed": not_assessed})
+    return findings, prompt_tokens, completion_tokens, cost, not_assessed
 
 
 def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[str, Any]],
@@ -346,6 +385,7 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
              clauses_exclude: Optional[List[str]] = None,
              min_severity: str = "info",
              budget: Optional["CostBudget"] = None,
+             max_file_chars: int = MAX_FILE_CHARS,
              on_progress=None) -> Dict[str, Any]:
     """Scan all files against one regulation's clauses. Returns
     {"findings": [...], "token_usage": {...}, "cache_stats": {...}}."""
@@ -354,18 +394,20 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
     clause_ids = [c["id"] for c in scoped_clauses] if (clauses_include or clauses_exclude) else None
 
     all_findings: List[Dict[str, Any]] = []
+    all_not_assessed: List[Dict[str, Any]] = []
     total_prompt_tokens = 0
     total_completion_tokens = 0
     total_cost = 0.0
     errors: List[str] = []
 
-    estimate = estimate_scan(files, regulation, scoped_clauses, provider)
+    estimate = estimate_scan(files, regulation, scoped_clauses, provider, max_file_chars)
     projected = {f["path"]: f["cost"] for f in estimate["per_file"]}
 
     def _work(file_data):
         return analyze_file(
             provider, cache, regulation, scoped_clauses, clause_ids, file_data,
             budget=budget, projected_cost=projected.get(file_data["path"], 0.0),
+            max_file_chars=max_file_chars,
         )
 
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, max(1, len(files)))) as executor:
@@ -375,8 +417,9 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
             file_data = future_to_file[future]
             completed += 1
             try:
-                findings, prompt_tokens, completion_tokens, cost = future.result()
+                findings, prompt_tokens, completion_tokens, cost, not_assessed = future.result()
                 all_findings.extend(findings)
+                all_not_assessed.extend(not_assessed)
                 total_prompt_tokens += prompt_tokens
                 total_completion_tokens += completion_tokens
                 total_cost += cost
@@ -421,7 +464,7 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
         {
             "path": fd["path"],
             "original_chars": fd["truncated_from"],
-            "analyzed_chars": MAX_FILE_CHARS,
+            "analyzed_chars": max_file_chars,
         }
         for fd in files
         if fd.get("truncated_from")
@@ -433,4 +476,5 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
         "cache_stats": cache.stats(),
         "errors": errors,
         "truncated": truncated,
+        "not_assessed": all_not_assessed,
     }

@@ -1141,6 +1141,7 @@ class PDFReportGenerator:
         ignored = audit_meta.get("ignored_files") or []
         truncated = audit_meta.get("truncated_files") or []
         failed = audit_meta.get("failed_files") or []
+        not_assessed = audit_meta.get("not_assessed") or []
 
         rows = []
         if unsupported:
@@ -1152,7 +1153,7 @@ class PDFReportGenerator:
             top = ", ".join(f"{name}" for name in list(excluded_dirs)[:6])
             rows.append((
                 "Excluded directories",
-                f"{total} directory(ies) skipped as dependency, build, or cache output - {top}",
+                f"{total} directory(ies) skipped as dependency, build, cache, or Clausi output - {top}",
             ))
         if ignored:
             rows.append((
@@ -1172,6 +1173,20 @@ class PDFReportGenerator:
                 "Failed during analysis",
                 f"{len(failed)} file(s) returned an error from the AI provider and produced "
                 "no findings",
+            ))
+
+        if not_assessed:
+            by_reason: Dict[str, int] = {}
+            for entry in not_assessed:
+                reason = entry.get("reason", "insufficient_context")
+                by_reason[reason] = by_reason.get(reason, 0) + 1
+            detail = ", ".join(
+                f"{r.replace('_', ' ')} ({n})" for r, n in by_reason.items()
+            )
+            rows.append((
+                "Clauses not assessed",
+                f"{len(not_assessed)} clause/file pair(s) the analysis declined to judge "
+                f"- {detail}. An abstention is not a pass; nothing was concluded",
             ))
 
         if not rows:

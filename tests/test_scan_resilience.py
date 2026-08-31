@@ -5,6 +5,8 @@ previously be lost or silently misreported.
 """
 
 import contextlib
+import os
+import time
 
 import pytest
 
@@ -15,7 +17,8 @@ from clausi.core.ai_provider import (
     call_with_retries,
     is_retryable,
 )
-from clausi.core.cache import LocalCache
+from clausi.core import scanner
+from clausi.core.cache import DEFAULT_TTL_SECONDS, LocalCache
 from clausi.core.compliance_analyzer import normalize_severity, run_scan
 from clausi.core.markdown_report import MarkdownGenerator
 from clausi.core.pdf_report import PDFReportGenerator
@@ -407,3 +410,94 @@ def test_budget_never_refuses_a_cache_hit():
     assert not budget.stopped
     assert provider.calls == []
     assert not result["errors"]
+
+
+# --- cache eviction --------------------------------------------------------
+#
+# The cache only ever grew. Content hash, prompt text and pack contents are all
+# in the key, so every file edit and every pack update orphans an entry that is
+# unreachable but never removed.
+
+def test_prune_removes_expired_and_over_cap_entries(tmp_path):
+    cache = LocalCache(ttl=60, cache_dir=tmp_path)
+    for i in range(5):
+        cache.set(f"scan_{i}", {"findings": [{"pad": "x" * 500}]})
+
+    stale = tmp_path / "scan_0.json"
+    os.utime(stale, (time.time() - 3600, time.time() - 3600))
+
+    result = cache.prune(max_bytes=2 * max(
+        p.stat().st_size for p in tmp_path.glob("scan_*.json")
+    ))
+
+    assert result["expired"] == 1
+    assert not stale.exists()
+    assert result["evicted"] >= 1
+    assert cache.size_bytes() > 0
+
+
+def test_prune_is_a_no_op_when_under_the_cap(tmp_path):
+    cache = LocalCache(ttl=DEFAULT_TTL_SECONDS, cache_dir=tmp_path)
+    cache.set("scan_keep", {"findings": []})
+
+    result = cache.prune(max_bytes=10 * 1024 * 1024)
+
+    assert result == {"expired": 0, "evicted": 0, "bytes_freed": 0}
+    assert (tmp_path / "scan_keep.json").exists()
+
+
+# --- coverage: our own output, and clauses the model declined to judge ------
+
+def test_scan_skips_clausi_own_output(tmp_path):
+    """A repeat scan used to discover the previous run's reports and list our
+    own PDF and CSV as unsupported files in every manifest after the first."""
+    (tmp_path / "app.py").write_text("print('x')", encoding="utf-8")
+    reports = tmp_path / "clausi" / "reports"
+    reports.mkdir(parents=True)
+    (reports / "report.pdf").write_text("pdf", encoding="utf-8")
+    (reports / "findings.md").write_text("md", encoding="utf-8")
+
+    files, coverage = scanner.scan_directory_with_coverage(
+        str(tmp_path), exclude_paths=[reports]
+    )
+
+    assert [f["path"] for f in files] == ["app.py"]
+    assert not coverage.get("skipped_unsupported_extension")
+
+
+def test_abstentions_are_normalized_and_returned():
+    provider = _StubProvider()
+    provider._not_assessed = [
+        {"clause_id": "X-1", "reason": "NOT_APPLICABLE", "explanation": "n/a here"},
+        {"clause_id": "X-2", "reason": "made up", "explanation": ""},
+        "garbage",
+    ]
+
+    def analyze(regulation, clauses, file_path, code):
+        return {"findings": [], "not_assessed": provider._not_assessed,
+                "prompt_tokens": 1, "completion_tokens": 1}
+
+    provider.analyze_code = analyze
+
+    result = run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+                      provider=provider, cache=_NullCache())
+
+    entries = result["not_assessed"]
+    assert len(entries) == 2  # the non-dict is dropped
+    assert entries[0]["reason"] == "not_applicable"
+    # An unrecognised reason must not become a silent pass.
+    assert entries[1]["reason"] == "insufficient_context"
+    assert all(e["file_path"] == "a.py" for e in entries)
+
+
+def test_coverage_section_reports_abstentions():
+    md = MarkdownGenerator()._coverage_section({
+        "not_assessed": [
+            {"file_path": "a.py", "clause_id": "X-1",
+             "reason": "not_applicable", "explanation": "no data handling"},
+        ],
+    })
+    text = "\n".join(md)
+    assert "Clauses not assessed" in text
+    assert "abstention is not a pass" in text
+    assert "X-1" in text

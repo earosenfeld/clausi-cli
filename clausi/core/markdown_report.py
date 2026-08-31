@@ -149,8 +149,9 @@ class MarkdownGenerator:
         unreadable = coverage.get("unreadable") or []
         truncated = audit_meta.get("truncated_files") or []
         failed = audit_meta.get("failed_files") or []
+        not_assessed = audit_meta.get("not_assessed") or []
 
-        if not (unsupported or ignored or unreadable or truncated or failed):
+        if not (unsupported or ignored or unreadable or truncated or failed or not_assessed):
             return []
 
         lines = ["## Coverage and Limits", "",
@@ -178,6 +179,22 @@ class MarkdownGenerator:
             for t in truncated[:10]:
                 lines.append(f"  - `{t.get('path')}` - {t.get('analyzed_chars')} of "
                              f"{t.get('original_chars')} characters analyzed")
+        if not_assessed:
+            by_reason: Dict[str, int] = {}
+            for entry in not_assessed:
+                reason = entry.get("reason", "insufficient_context")
+                by_reason[reason] = by_reason.get(reason, 0) + 1
+            summary = ", ".join(f"{r.replace('_', ' ')} ({n})" for r, n in by_reason.items())
+            lines += [f"- **Clauses not assessed:** {len(not_assessed)} clause/file "
+                      f"pair(s) the analysis declined to judge - {summary}. An "
+                      "abstention is not a pass; nothing was concluded."]
+            for entry in not_assessed[:10]:
+                lines.append(
+                    f"  - `{entry.get('file_path')}` / {entry.get('clause_id')} - "
+                    f"{entry.get('explanation') or entry.get('reason')}"
+                )
+            if len(not_assessed) > 10:
+                lines.append(f"  - ...and {len(not_assessed) - 10} more")
         lines.append("")
         return lines
 

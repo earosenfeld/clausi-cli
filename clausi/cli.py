@@ -304,6 +304,19 @@ def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple]
             available = clause_selector.list_available_presets(target_reg)
             if available:
                 console.print(f"[cyan]Available presets:[/cyan] {', '.join(available)}")
+        else:
+            # A preset narrows the clause list, and a violation of an excluded
+            # clause is then reported against whichever included clause fits
+            # best - or not at all. Measured on a real repository, 66% of the
+            # findings from a full scan landed on clauses a preset could not
+            # express. That is fine for a fast triage pass and wrong as the
+            # basis for a compliance claim, so say so every time.
+            console.print(
+                f"[yellow]Note: --preset {preset} scans "
+                f"{len(clauses_include)} of the regulation's clauses. Clauses "
+                "outside the preset are not assessed - this is a triage pass, "
+                "not a full audit, and the report will say so.[/yellow]"
+            )
 
     if clauses_include or clauses_exclude:
         clause_selector.display_clause_scope_summary(clauses_include, clauses_exclude)
@@ -311,13 +324,16 @@ def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple]
     return clauses_include, clauses_exclude
 
 
-def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple]) -> Tuple[List[dict], Dict[str, Any]]:
+def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
+                                exclude_paths: Optional[List[Path]] = None) -> Tuple[List[dict], Dict[str, Any]]:
     """Discover and filter files to analyze."""
     from clausi.utils.output import create_enhanced_progress_bar
 
     with create_enhanced_progress_bar("Scanning project files...") as progress:
         task = progress.add_task("Scanning project files...", total=None)
-        discovered_files, coverage = scanner.scan_directory_with_coverage(abs_path)
+        discovered_files, coverage = scanner.scan_directory_with_coverage(
+            abs_path, exclude_paths=exclude_paths
+        )
         progress.update(task, completed=True)
 
     if not discovered_files:
@@ -372,7 +388,7 @@ def _save_scan_manifest(output_dir: Path, audit_meta: Dict[str, Any],
             "file_count": audit_meta.get("files_analyzed"),
             "file_types": audit_meta.get("file_types"),
             "total_bytes": audit_meta.get("total_bytes"),
-            "max_chars_per_file": compliance_analyzer.MAX_FILE_CHARS,
+            "max_chars_per_file": audit_meta.get("max_file_chars", compliance_analyzer.MAX_FILE_CHARS),
         },
         "not_analyzed": {
             "unsupported_extension": coverage.get("skipped_unsupported_extension", {}),
@@ -384,13 +400,17 @@ def _save_scan_manifest(output_dir: Path, audit_meta: Dict[str, Any],
         },
         "partially_analyzed": {
             "truncated": result.get("truncated", []),
+            # Clauses the model explicitly declined to judge for a file. An
+            # abstention is not a pass: it means nothing was concluded.
+            "clauses_not_assessed": result.get("not_assessed", []),
         },
         "supported_extensions": coverage.get("supported_extensions", []),
         "caveat": (
             "Findings cover only the files listed under 'analyzed', and only the "
             "first max_chars_per_file characters of each. Absence of a finding for "
-            "anything listed under 'not_analyzed' or beyond that limit means it was "
-            "not examined, not that it is compliant."
+            "anything listed under 'not_analyzed', under "
+            "'partially_analyzed.clauses_not_assessed', or beyond that limit means "
+            "it was not examined, not that it is compliant."
         ),
     }
     try:
@@ -419,7 +439,7 @@ def _print_coverage_summary(coverage: Dict[str, Any], ignored: List[Dict[str, st
         # Named explicitly: a few of these (build, dist, target) can legitimately
         # hold real source, and the user needs to notice if theirs was skipped.
         names = ", ".join(sorted(excluded_dirs))
-        console.print(f"[dim]Skipped dependency/build directories: {names}[/dim]")
+        console.print(f"[dim]Skipped directories: {names}[/dim]")
     if ignored:
         console.print(f"[dim]Excluded by ignore rules: {len(ignored)} file(s)[/dim]")
     unreadable = coverage.get("unreadable") or []
@@ -579,13 +599,34 @@ def cache_clear():
     console.print(f"[green]{emoji('checkmark')}[/green] Removed {removed} cached result(s).")
 
 
+@cache.command("prune")
+@click.option("--max-size-mb", type=float, default=None,
+              help="Size ceiling in MB (default: from config, else 500)")
+def cache_prune(max_size_mb: Optional[float]):
+    """Drop expired entries, then the oldest ones until under the size cap."""
+    cfg = load_config() or {}
+    cache_cfg = cfg.get("cache", {})
+    limit_mb = max_size_mb if max_size_mb is not None else cache_cfg.get("max_size_mb", 500)
+    local = LocalCache(ttl=cache_cfg.get("ttl_days", 30) * 24 * 60 * 60)
+    result = local.prune(max_bytes=int(limit_mb * 1024 * 1024))
+    console.print(
+        f"[green]{emoji('checkmark')}[/green] Removed {result['expired']} expired and "
+        f"{result['evicted']} over-cap entr(ies), freeing "
+        f"{result['bytes_freed'] / (1024 * 1024):.1f} MB."
+    )
+
+
 @cache.command("stats")
 def cache_stats_cmd():
     """Show local cache directory info."""
     cache_dir = Path.home() / ".clausi" / "cache"
     count = len(list(cache_dir.glob("scan_*.json"))) if cache_dir.exists() else 0
+    size_mb = LocalCache().size_bytes() / (1024 * 1024) if cache_dir.exists() else 0.0
+    cfg = load_config() or {}
+    limit_mb = cfg.get("cache", {}).get("max_size_mb", 500)
     console.print(f"Cache directory: [bold]{cache_dir}[/bold]")
     console.print(f"Cached results: [bold]{count}[/bold]")
+    console.print(f"Size on disk: [bold]{size_mb:.1f} MB[/bold] (cap {limit_mb:.0f} MB)")
 
 
 @cli.group()
@@ -684,7 +725,11 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         reg_labels.append(label)
     console.print(f"Regulations: {', '.join(reg_labels)}")
 
-    files, scope_meta = _discover_and_filter_files(abs_path, ignore)
+    files, scope_meta = _discover_and_filter_files(
+        abs_path, ignore,
+        # Never scan our own output or state - see scanner.scan_directory_with_coverage.
+        exclude_paths=[output_path, Path(abs_path) / ".clausi"],
+    )
 
     # Resolve each regulation's clauses locally (bundled YAML + project/custom)
     regulation_data = {}
@@ -694,6 +739,15 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             console.print(f"[red]Error: Unknown regulation '{reg_code}'[/red]")
             sys.exit(1)
         regulation_data[reg_code] = data
+
+    # Resolved before the estimate: the quote must be based on the same
+    # truncation limit the scan will apply.
+    _cfg = load_config()
+    max_file_chars = int(
+        (_cfg.get("scan", {}) if _cfg else {}).get(
+            "max_file_chars", compliance_analyzer.MAX_FILE_CHARS
+        )
+    )
 
     # Local cost estimate (informational - BYOK means the provider bills you
     # directly). Counts what is actually sent: the prompt scaffold repeated for
@@ -709,6 +763,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 reg_data["clauses"], clauses_include, clauses_exclude
             ),
             ai_provider,
+            max_file_chars,
         )
     est_cost = sum(e["cost"] for e in estimates.values())
 
@@ -772,6 +827,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                     clauses_exclude=clauses_exclude,
                     min_severity=min_severity,
                     budget=budget,
+                    max_file_chars=max_file_chars,
                 )
         except Exception as e:  # noqa: BLE001
             # One regulation failing must not discard the regulations that
@@ -813,6 +869,8 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 "resolved_findings": lifecycle["resolved_findings"],
                 "comparison_baseline": lifecycle["is_baseline"],
                 "regulation_pack_sha256": regulation_pack_hash(reg_data),
+                "max_file_chars": max_file_chars,
+                "not_assessed": result.get("not_assessed", []),
                 "truncated_files": result.get("truncated", []),
                 # Files that errored mid-scan are part of coverage, not just
                 # console noise: a report that omits them understates what was
@@ -937,6 +995,13 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             f"were not analyzed - see the skipped files above. This is NOT a "
             f"complete scan.[/yellow]"
         )
+
+    # Keep the cache bounded without the user having to think about it. Runs
+    # after the reports are written, so a failure here can never cost a scan.
+    try:
+        cache.prune(max_bytes=int(cache_cfg.get("max_size_mb", 500) * 1024 * 1024))
+    except Exception:  # noqa: BLE001 - housekeeping must never fail a scan
+        pass
 
     display_cache = show_cache_stats if show_cache_stats is not None else (cfg.get("ui", {}).get("show_cache_stats", True) if cfg else True)
     if display_cache:

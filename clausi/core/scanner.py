@@ -1,8 +1,9 @@
 """File scanning and filtering logic."""
 
+import contextlib
 import os
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import pathspec
@@ -48,7 +49,9 @@ EXCLUDE_FILES = {".DS_Store", "*.egg-info", "*.pyc", "*.pyo", ".clausiignore"}
 MAX_MANIFEST_EXAMPLES = 10
 
 
-def scan_directory_with_coverage(path: str) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+def scan_directory_with_coverage(
+    path: str, exclude_paths: Optional[Iterable[Path]] = None
+) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     """Discover analyzable files and record everything that was not analyzed.
 
     Returns (files, coverage). Coverage exists so a scan can state its own
@@ -62,11 +65,39 @@ def scan_directory_with_coverage(path: str) -> Tuple[List[Dict[str, str]], Dict[
     unreadable: List[Dict[str, str]] = []
     root_path = Path(path)
 
+    # Clausi's own output and state directories. A repeat scan would otherwise
+    # discover the reports from the previous run and list our own PDF and CSV
+    # as "unsupported files" in the coverage manifest of every scan after the
+    # first. Passed in rather than hardcoded because the output directory is
+    # configurable and can sit anywhere.
+    skip_roots = set()
+    for candidate in (exclude_paths or []):
+        with contextlib.suppress(OSError):
+            skip_roots.add(Path(candidate).resolve())
+
+    def _is_skipped(directory: Path) -> bool:
+        if not skip_roots:
+            return False
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            return False
+        return any(
+            resolved == skip or skip in resolved.parents for skip in skip_roots
+        )
+
     for root, dirs, files in os.walk(root_path):
         pruned = [d for d in dirs if d in EXCLUDE_DIRS]
         for d in pruned:
             excluded_dirs[d] = excluded_dirs.get(d, 0) + 1
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
+        own_output = [d for d in dirs if _is_skipped(Path(root) / d)]
+        for d in own_output:
+            excluded_dirs[f"{d} (Clausi output)"] = (
+                excluded_dirs.get(f"{d} (Clausi output)", 0) + 1
+            )
+        dirs[:] = [d for d in dirs if d not in own_output]
 
         for file in files:
             file_path = Path(root) / file

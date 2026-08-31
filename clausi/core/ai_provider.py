@@ -55,11 +55,25 @@ Respond with a JSON object in this exact format:
       "auto_fixable": true,
       "evidence": "Why this is a violation"
     }}
+  ],
+  "not_assessed": [
+    {{
+      "clause_id": "EUAIA-3.2",
+      "reason": "not_applicable|not_observable_in_code|insufficient_context",
+      "explanation": "Why this clause could not be judged from this file"
+    }}
   ]
 }}
 
 Rules:
 - Only include actual violations, not potential issues
+- A clause you cannot judge from this file belongs in not_assessed, never in findings
+- Use not_assessed rather than silence: an omitted clause is read as "compliant",
+  so leaving out a clause you could not evaluate reports a false clean result
+- not_applicable: the clause governs something this file does not do
+- not_observable_in_code: compliance depends on process, policy, or configuration
+  outside this source file
+- insufficient_context: this file alone does not show enough to decide
 - Confidence score: 0.0 (uncertain) to 1.0 (certain)
 - finding_certainty: High (>=0.8), Medium (0.5-0.8), Low (<0.5)
 - Severity: critical (blocking issue), high (legal risk), medium (best practice), low (minor)
@@ -336,6 +350,7 @@ class ClaudeProvider(AIProvider):
         usage = getattr(response, "usage", None)
         return {
             "findings": parsed.get("findings", []),
+            "not_assessed": parsed.get("not_assessed", []),
             "prompt_tokens": getattr(usage, "input_tokens", estimate_tokens(prompt)),
             "completion_tokens": getattr(usage, "output_tokens", estimate_tokens(text)),
         }
@@ -431,6 +446,7 @@ class OpenAIProvider(AIProvider):
         usage = getattr(response, "usage", None)
         return {
             "findings": parsed.get("findings", []),
+            "not_assessed": parsed.get("not_assessed", []),
             "prompt_tokens": getattr(usage, "prompt_tokens", estimate_tokens(prompt)),
             "completion_tokens": getattr(usage, "completion_tokens", estimate_tokens(text)),
         }
@@ -556,6 +572,7 @@ class LocalAgentProvider(AIProvider):
             ) from last_error
         return {
             "findings": parsed.get("findings", []),
+            "not_assessed": parsed.get("not_assessed", []),
             "prompt_tokens": estimate_tokens(prompt),
             "completion_tokens": estimate_tokens(text),
         }

@@ -150,7 +150,10 @@ clausi scan . -r EU-AIA -r GDPR -r HIPAA
 
 ### Clause Scoping
 
-Reduce scan time and cost by focusing on specific clauses:
+Reduce scan time and cost by focusing on specific clauses. A narrowed scan is a
+triage pass, not an audit: clauses outside the scope are never assessed, and a
+violation of one of them is reported against whichever in-scope clause fits best,
+or not at all. Every report states its own clause scope.
 
 ```bash
 # Only critical clauses (roughly 60-85% fewer clauses scanned, regulation-dependent)
