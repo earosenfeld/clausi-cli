@@ -70,6 +70,12 @@ RIGHT_MARGIN = 18 * mm
 TOP_MARGIN = 22 * mm
 BOTTOM_MARGIN = 18 * mm
 CONTENT_WIDTH = PAGE_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
+# Usable width inside a finding card, which pads 9pt on each side. Laying a
+# nested table out at full CONTENT_WIDTH pushed it past the card's own border
+# by exactly that padding - visible as the metadata band bleeding outside the
+# card frame on every evidence page.
+CARD_PADDING = 9
+CARD_INNER_WIDTH = CONTENT_WIDTH - 2 * CARD_PADDING
 
 SEVERITY_COLORS = {
     "critical": (RED, RED_BG),
@@ -684,7 +690,10 @@ class PDFReportGenerator:
             self.styles["cover_meta"],
         )
         body = Paragraph(_safe(status["title"]), self.styles["small_bold"])
-        table = Table([[label, body]], colWidths=[54 * mm, CONTENT_WIDTH - 54 * mm])
+        # 54mm forced "HIGH-PRIORITY GAPS DETECTED" onto two cramped lines on
+        # the cover; the verdict is the first thing a reader sees and should
+        # not wrap.
+        table = Table([[label, body]], colWidths=[62 * mm, CONTENT_WIDTH - 62 * mm])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), background),
             ("BOX", (0, 0), (-1, -1), 0.7, accent),
@@ -1289,7 +1298,10 @@ class PDFReportGenerator:
                 Paragraph(_safe(target), self.styles["table_cell"]),
                 Paragraph(_safe(status), self.styles["table_cell"]),
             ])
-        widths = [28 * mm, 20 * mm, 27 * mm, 55 * mm, 18 * mm, 13 * mm, 13 * mm]
+        # TARGET and STATUS were 13mm, which after padding left ~3mm of text
+        # column - narrow enough that ReportLab broke the single-word headers
+        # mid-word ("TARGE T", "STATU S") in the rendered PDF.
+        widths = [30 * mm, 18 * mm, 24 * mm, 50 * mm, 20 * mm, 16 * mm, 16 * mm]
         table = LongTable(data, repeatRows=1, colWidths=widths)
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), INK_2),
@@ -1357,7 +1369,7 @@ class PDFReportGenerator:
                     self.styles["small"],
                 ),
             ]
-        ], colWidths=[CONTENT_WIDTH - 31 * mm, 31 * mm])
+        ], colWidths=[CARD_INNER_WIDTH - 31 * mm, 31 * mm])
         header.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), background),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -1381,7 +1393,8 @@ class PDFReportGenerator:
                 Paragraph(f'<b>STATUS</b><br/>{_safe(finding_status)}', self.styles["small"]),
                 Paragraph(f'<b>TICKET</b><br/>{_safe(ticket)}', self.styles["small"]),
             ],
-        ], colWidths=[CONTENT_WIDTH * 0.42, CONTENT_WIDTH * 0.18, CONTENT_WIDTH * 0.18, CONTENT_WIDTH * 0.22])
+        ], colWidths=[CARD_INNER_WIDTH * 0.42, CARD_INNER_WIDTH * 0.18,
+                       CARD_INNER_WIDTH * 0.18, CARD_INNER_WIDTH * 0.22])
         metadata.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), SLATE_50),
             ("INNERGRID", (0, 0), (-1, -1), 0.4, SLATE_200),
@@ -1424,7 +1437,7 @@ class PDFReportGenerator:
             Paragraph("CLOSURE EVIDENCE", self.styles["eyebrow"]),
             Paragraph(_safe(verification), self.styles["table_cell"]),
         ]
-        detail = Table([[left, right]], colWidths=[(CONTENT_WIDTH - 18) / 2] * 2)
+        detail = Table([[left, right]], colWidths=[CARD_INNER_WIDTH / 2] * 2)
         detail.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LINEAFTER", (0, 0), (0, -1), 0.45, SLATE_200),
@@ -1438,10 +1451,10 @@ class PDFReportGenerator:
         card.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.7, SLATE_200),
             ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-            ("LEFTPADDING", (0, 0), (-1, -1), 9),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 9),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ("LEFTPADDING", (0, 0), (-1, -1), CARD_PADDING),
+            ("RIGHTPADDING", (0, 0), (-1, -1), CARD_PADDING),
+            ("TOPPADDING", (0, 0), (-1, -1), CARD_PADDING),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), CARD_PADDING),
         ]))
         return card
 

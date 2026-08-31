@@ -73,7 +73,10 @@ def stable_finding_id(finding: Dict[str, Any], regulation: str) -> str:
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:8].upper()
     regulation_key = re.sub(r"[^A-Z0-9]", "", regulation.upper())[:8] or "GEN"
-    clause_key = re.sub(r"[^A-Z0-9]", "", str(finding.get("clause_id", "" )).upper())[-6:] or "CLAUSE"
+    # Keep the front of the clause id, not the tail. Slicing [-6:] turned
+    # ARTICLE12 into "ICLE12" and ARTICLE9 into "TICLE9", so every printed
+    # finding id read as a corrupted clause name.
+    clause_key = re.sub(r"[^A-Z0-9]", "", str(finding.get("clause_id", "")).upper())[:10] or "CLAUSE"
     return f"CL-{regulation_key}-{clause_key}-{digest}"
 
 

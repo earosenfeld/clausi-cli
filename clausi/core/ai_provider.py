@@ -493,6 +493,8 @@ class LocalAgentProvider(AIProvider):
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         # api_key is accepted for factory symmetry and deliberately unused.
+        # model stays empty unless the user named one: it is passed straight to
+        # the agent CLI as --model, which rejects anything it does not know.
         super().__init__(api_key or "", model or "")
 
     @classmethod

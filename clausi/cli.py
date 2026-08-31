@@ -324,6 +324,17 @@ def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple]
     return clauses_include, clauses_exclude
 
 
+def _reproduction_command() -> str:
+    """The command a reader can actually re-run.
+
+    sys.argv[0] is the absolute path to __main__.py when the CLI is invoked as
+    `python -m clausi`, which printed a machine-specific path into the report's
+    reproduction field - not a command anyone else could run.
+    """
+    args = sys.argv[1:]
+    return shlex.join(["clausi", *args])
+
+
 def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
                                 exclude_paths: Optional[List[Path]] = None) -> Tuple[List[dict], Dict[str, Any]]:
     """Discover and filter files to analyze."""
@@ -856,14 +867,18 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             audit_meta = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "provider": provider,
-                "model": model,
+                # An agent CLI picks its own model and does not tell us which.
+                # Recorded explicitly, because a blank field rendered as "Not
+                # recorded" and read like a bug rather than a property of
+                # running through someone else's CLI.
+                "model": model or f"{provider} CLI default",
                 "total_tokens": result["token_usage"]["total_tokens"],
                 "cost": result["token_usage"]["cost"],
                 "files_scanned": len(files),
                 **scope_meta,
                 "clauses_include": clauses_include,
                 "clauses_exclude": clauses_exclude,
-                "scan_command": shlex.join(sys.argv),
+                "scan_command": _reproduction_command(),
                 "change_summary": lifecycle["change_summary"],
                 "resolved_ids": lifecycle["resolved_ids"],
                 "resolved_findings": lifecycle["resolved_findings"],
