@@ -163,6 +163,23 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+# Every file's request carries the whole prompt scaffold - the instructions plus
+# the full text of every clause in scope - so the per-file input is dominated by
+# the regulation, not by the file, on anything but the largest sources. Measured
+# 2026-08-31: EU-AIA 1,977 tokens (8 clauses), GDPR 2,038 (9), SOC2 2,885 (20).
+# Estimating from file content alone understates a real scan by more than 2x.
+def prompt_overhead_tokens(regulation: str, clauses: List[Dict[str, Any]]) -> int:
+    """Input tokens each file's request costs before any of its code is added."""
+    return estimate_tokens(build_prompt(regulation, clauses, "src/placeholder.py", ""))
+
+
+# Output is a findings array, not a function of input size: a large file does not
+# produce a proportionally larger response, and MAX_ANALYSIS_TOKENS caps it
+# regardless. Measured 2026-08-31 over a real scan: ~1,018 completion tokens per
+# call. Rounded up, since under-quoting is the failure that costs the user money.
+EST_OUTPUT_TOKENS_PER_CALL = 1100
+
+
 class AIProviderError(Exception):
     """Raised when an AI provider call fails."""
 

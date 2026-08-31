@@ -303,3 +303,107 @@ def test_local_agent_gives_up_after_repeated_garbled_responses():
 
     with pytest.raises(AIProviderError, match="attempt"):
         provider.analyze_code("EU AI Act", [], "a.py", "code")
+
+
+# --- cost estimate and the --max-cost ceiling ------------------------------
+#
+# The estimate used to count file bytes only, ignoring that every request also
+# carries the full clause text - understating a real scan by more than 2x. And
+# --max-cost only ever gated the estimate, so a wrong estimate meant no ceiling
+# at all on what a scan could actually charge.
+
+class _PricedProvider(_StubProvider):
+    """Charges a flat amount per call, so budget arithmetic is exact."""
+
+    def __init__(self, cost_per_call=0.10, **kwargs):
+        super().__init__(**kwargs)
+        self._cost_per_call = cost_per_call
+        self.calls = []
+
+    def analyze_code(self, regulation, clauses, file_path, code):
+        self.calls.append(file_path)
+        return super().analyze_code(regulation, clauses, file_path, code)
+
+    def estimate_cost(self, input_tokens, output_tokens):
+        return self._cost_per_call
+
+
+CLAUSES = [
+    {"id": "X-1", "title": "A clause", "description": "d" * 400,
+     "requirements": ["r" * 200]},
+]
+
+
+def test_estimate_includes_prompt_overhead():
+    overhead = compliance_analyzer.prompt_overhead_tokens("Reg", CLAUSES)
+    assert overhead > 100
+
+    files = [{"path": "a.py", "content": "print('x')"}]
+    est = compliance_analyzer.estimate_scan(files, "Reg", CLAUSES, _StubProvider())
+
+    assert est["prompt_overhead_tokens"] == overhead
+    # The file itself is a rounding error next to the clause text.
+    assert est["input_tokens"] >= overhead
+
+
+def test_estimate_counts_truncated_content_only():
+    """A quote must never be based on more text than the scan will send."""
+    huge = "x" * (compliance_analyzer.MAX_FILE_CHARS * 10)
+    est = compliance_analyzer.estimate_scan(
+        [{"path": "big.py", "content": huge}], "Reg", CLAUSES, _StubProvider()
+    )
+    ceiling = (
+        compliance_analyzer.prompt_overhead_tokens("Reg", CLAUSES)
+        + compliance_analyzer.MAX_FILE_CHARS // 4
+        + 100
+    )
+    assert est["input_tokens"] < ceiling
+
+
+def test_max_cost_stops_a_running_scan():
+    files = [{"path": f"f{i}.py", "content": "print('x')"} for i in range(6)]
+    provider = _PricedProvider(cost_per_call=0.10)
+    budget = compliance_analyzer.CostBudget(limit=0.25)
+
+    result = run_scan(
+        files=files, regulation="Reg", clauses=CLAUSES,
+        provider=provider, cache=_NullCache(), budget=budget,
+    )
+
+    assert budget.stopped
+    assert len(provider.calls) < len(files)
+    assert budget.spent <= 0.25
+    assert result["errors"]
+    assert any("--max-cost" in e for e in result["errors"])
+
+
+def test_no_max_cost_never_stops():
+    files = [{"path": f"f{i}.py", "content": "print('x')"} for i in range(4)]
+    provider = _PricedProvider(cost_per_call=100.0)
+    budget = compliance_analyzer.CostBudget(limit=None)
+
+    run_scan(files=files, regulation="Reg", clauses=CLAUSES,
+             provider=provider, cache=_NullCache(), budget=budget)
+
+    assert not budget.stopped
+    assert len(provider.calls) == len(files)
+
+
+def test_budget_never_refuses_a_cache_hit():
+    """Cache hits cost nothing, so an exhausted budget must not block them."""
+
+    class _HitCache(_NullCache):
+        def get(self, key):
+            return {"findings": []}
+
+    provider = _PricedProvider(cost_per_call=0.10)
+    budget = compliance_analyzer.CostBudget(limit=0.0)
+
+    result = run_scan(
+        files=[{"path": "a.py", "content": "print('x')"}], regulation="Reg",
+        clauses=CLAUSES, provider=provider, cache=_HitCache(), budget=budget,
+    )
+
+    assert not budget.stopped
+    assert provider.calls == []
+    assert not result["errors"]

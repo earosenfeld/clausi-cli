@@ -695,21 +695,47 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             sys.exit(1)
         regulation_data[reg_code] = data
 
-    # Rough local cost estimate (informational only - BYOK means the provider bills you directly)
-    total_chars = sum(len(f["content"]) for f in files)
-    est_input_tokens = estimate_tokens("x" * total_chars) * len(regulations)
+    # Local cost estimate (informational - BYOK means the provider bills you
+    # directly). Counts what is actually sent: the prompt scaffold repeated for
+    # every file, plus each file's text after truncation.
     ai_provider = get_ai_provider(provider, api_key, model)
-    est_cost = ai_provider.estimate_cost(est_input_tokens, est_input_tokens // 4)
+    estimates = {}
+    for reg_code in regulations:
+        reg_data = regulation_data[reg_code]
+        estimates[reg_code] = compliance_analyzer.estimate_scan(
+            files,
+            reg_data["name"],
+            compliance_analyzer.select_clauses(
+                reg_data["clauses"], clauses_include, clauses_exclude
+            ),
+            ai_provider,
+        )
+    est_cost = sum(e["cost"] for e in estimates.values())
 
-    console.print("\n[bold]Rough Estimate (informational - billed directly by your provider):[/bold]")
+    console.print("\n[bold]Estimate (informational - billed directly by your provider):[/bold]")
     console.print(f"Files: {len(files)}  |  Regulations: {len(regulations)}  |  Est. cost: ${est_cost:.2f}")
+    console.print(
+        "[dim]Assumes no cache hits. Each file's request also carries the full "
+        "clause text, which is most of the cost on small files.[/dim]"
+    )
     if show_details:
-        for f in files:
-            console.print(f"  {f['path']}: ~{estimate_tokens(f['content']):,} tokens")
+        for reg_code, est in estimates.items():
+            console.print(
+                f"  [bold]{reg_code}[/bold] - prompt overhead "
+                f"~{est['prompt_overhead_tokens']:,} tokens per file"
+            )
+            for f in est["per_file"]:
+                console.print(
+                    f"    {f['path']}: ~{f['input_tokens']:,} in / "
+                    f"~{f['output_tokens']:,} out  (${f['cost']:.4f})"
+                )
 
     if max_cost is not None and est_cost > max_cost:
         console.print(f"\n[red]Error: Estimated cost (${est_cost:.2f}) exceeds maximum cost (${max_cost:.2f})[/red]")
         sys.exit(1)
+
+    # The estimate is a guess; the ceiling has to hold against real usage too.
+    budget = compliance_analyzer.CostBudget(max_cost)
 
     if not skip_confirmation:
         if not click.confirm(f"\nProceed with analysis? Estimated cost: ${est_cost:.2f}"):
@@ -745,6 +771,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                     clauses_include=clauses_include,
                     clauses_exclude=clauses_exclude,
                     min_severity=min_severity,
+                    budget=budget,
                 )
         except Exception as e:  # noqa: BLE001
             # One regulation failing must not discard the regulations that
@@ -901,6 +928,16 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
 
     console.print(f"\n[bold]Actual Cost:[/bold] ${total_cost:.4f}")
 
+    if budget.stopped:
+        # The user asked for a hard ceiling and got one. Say so explicitly -
+        # a partial scan that looks complete is the dangerous outcome.
+        console.print(
+            f"\n[yellow]{emoji('warning')} Stopped early to stay under "
+            f"--max-cost ${max_cost:.2f} (spent ${budget.spent:.4f}). Some files "
+            f"were not analyzed - see the skipped files above. This is NOT a "
+            f"complete scan.[/yellow]"
+        )
+
     display_cache = show_cache_stats if show_cache_stats is not None else (cfg.get("ui", {}).get("show_cache_stats", True) if cfg else True)
     if display_cache:
         from clausi.utils.output import display_cache_statistics
@@ -924,6 +961,11 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             f"\n[red]Scan failed: no files could be analyzed. "
             f"Reports in {output_path} are empty and must not be treated as evidence.[/red]"
         )
+        raise SystemExit(2)
+
+    if budget.stopped:
+        # Exit non-zero: the reports are real but partial, and CI must not read
+        # a cost-truncated scan as a clean pass.
         raise SystemExit(2)
 
     console.print(f"\n[green]Scan completed! Reports saved to {output_path}[/green]")

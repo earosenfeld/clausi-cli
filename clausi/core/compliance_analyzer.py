@@ -2,10 +2,18 @@
 with on-disk caching, and post-processes findings for report generation.
 """
 
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
-from clausi.core.ai_provider import AIProvider, AIProviderError, analysis_fingerprint
+from clausi.core.ai_provider import (
+    EST_OUTPUT_TOKENS_PER_CALL,
+    AIProvider,
+    AIProviderError,
+    analysis_fingerprint,
+    estimate_tokens,
+    prompt_overhead_tokens,
+)
 from clausi.core.cache import LocalCache
 
 MAX_FILE_CHARS = 8000
@@ -157,9 +165,104 @@ def apply_effort_bumping(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return findings
 
 
+def select_clauses(clauses: List[Dict[str, Any]],
+                    include: Optional[List[str]] = None,
+                    exclude: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Apply --include/--exclude scoping. Shared so the estimate and the scan
+    can never disagree about which clauses are in play."""
+    if include:
+        return [c for c in clauses if c.get("id") in include]
+    if exclude:
+        return [c for c in clauses if c.get("id") not in exclude]
+    return clauses
+
+
+def scoped_content(content: str) -> str:
+    """The text actually sent for a file - truncation included.
+
+    Shared by the estimator and the scan so a quote can never be based on more
+    content than the scan will send.
+    """
+    if len(content) > MAX_FILE_CHARS:
+        return content[:MAX_FILE_CHARS] + "\n... [TRUNCATED] ..."
+    return content
+
+
+def estimate_scan(files: List[Dict[str, Any]], regulation: str,
+                   clauses: List[Dict[str, Any]], provider: AIProvider) -> Dict[str, Any]:
+    """Estimate one regulation's scan. Returns per-file and total figures.
+
+    Counts what is actually sent: the prompt scaffold for every file plus the
+    (possibly truncated) file text, and a flat per-call output allowance.
+    """
+    overhead = prompt_overhead_tokens(regulation, clauses)
+    per_file = []
+    for file_data in files:
+        input_tokens = overhead + estimate_tokens(scoped_content(file_data["content"]))
+        per_file.append({
+            "path": file_data["path"],
+            "input_tokens": input_tokens,
+            "output_tokens": EST_OUTPUT_TOKENS_PER_CALL,
+            "cost": provider.estimate_cost(input_tokens, EST_OUTPUT_TOKENS_PER_CALL),
+        })
+    return {
+        "prompt_overhead_tokens": overhead,
+        "per_file": per_file,
+        "input_tokens": sum(f["input_tokens"] for f in per_file),
+        "output_tokens": EST_OUTPUT_TOKENS_PER_CALL * len(per_file),
+        "cost": sum(f["cost"] for f in per_file),
+    }
+
+
+class CostBudgetExceeded(AIProviderError):
+    """Raised instead of making a call that would push spend past --max-cost."""
+
+
+class CostBudget:
+    """Enforces --max-cost against money actually spent, not just the quote.
+
+    The pre-scan estimate is a guess; the provider's real usage is not. Without
+    this, a --max-cost that passes the estimate places no ceiling at all on what
+    a scan can charge. Cache hits cost nothing and are never counted.
+    """
+
+    def __init__(self, limit: Optional[float]):
+        self.limit = limit
+        self.spent = 0.0
+        self.stopped = False
+        self._lock = threading.Lock()
+
+    def reserve(self, projected: float) -> None:
+        """Claim room for one call, or raise if it would break the ceiling.
+
+        The claim is added to `spent` immediately, before the call is made.
+        MAX_WORKERS files are in flight at once, so a check that only read the
+        balance would let every worker pass the ceiling together and blow
+        through the limit by up to a full batch of calls.
+        """
+        if self.limit is None:
+            return
+        with self._lock:
+            if self.spent + projected > self.limit:
+                self.stopped = True
+                raise CostBudgetExceeded(
+                    f"skipped to stay under --max-cost ${self.limit:.2f} "
+                    f"(committed ${self.spent:.2f}, this file ~${projected:.2f})"
+                )
+            self.spent += projected
+
+    def record(self, projected: float, actual: float) -> None:
+        """Settle a completed call: swap its reservation for what it really cost."""
+        if self.limit is None:
+            return
+        with self._lock:
+            self.spent += actual - projected
+
+
 def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
                   clauses: List[Dict[str, Any]], clause_ids: Optional[List[str]],
-                  file_data: Dict[str, Any]):
+                  file_data: Dict[str, Any], budget: Optional["CostBudget"] = None,
+                  projected_cost: float = 0.0):
     """Analyze a single file, using the cache when possible.
 
     Returns (findings, prompt_tokens, completion_tokens, cost).
@@ -170,7 +273,7 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         # Record the loss. A truncated file yields findings for only the first
         # MAX_FILE_CHARS, so "no finding" past the cut means "not examined".
         file_data["truncated_from"] = len(content)
-        content = content[:MAX_FILE_CHARS] + "\n... [TRUNCATED] ..."
+    content = scoped_content(content)
 
     cache_key = cache.generate_cache_key(
         content, regulation, clauses=clause_ids, provider=provider.name,
@@ -197,9 +300,25 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         if cached is not None:
             return _from_cache(cached)
 
-        return _analyze_uncached(
-            provider, cache, regulation, clauses, file_path, content, cache_key
-        )
+        # Checked here, inside the miss path: a cache hit costs nothing and
+        # must never be refused for budget reasons.
+        if budget is not None:
+            budget.reserve(projected_cost)
+
+        try:
+            findings, prompt_tokens, completion_tokens, cost = _analyze_uncached(
+                provider, cache, regulation, clauses, file_path, content, cache_key
+            )
+        except Exception:
+            # Release the reservation. A failed call produced no findings, and
+            # holding its projection would shrink the ceiling for the files
+            # that can still succeed.
+            if budget is not None:
+                budget.record(projected_cost, 0.0)
+            raise
+        if budget is not None:
+            budget.record(projected_cost, cost)
+        return findings, prompt_tokens, completion_tokens, cost
 
 
 def _analyze_uncached(provider, cache, regulation, clauses, file_path, content, cache_key):
@@ -226,14 +345,11 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
              clauses_include: Optional[List[str]] = None,
              clauses_exclude: Optional[List[str]] = None,
              min_severity: str = "info",
+             budget: Optional["CostBudget"] = None,
              on_progress=None) -> Dict[str, Any]:
     """Scan all files against one regulation's clauses. Returns
     {"findings": [...], "token_usage": {...}, "cache_stats": {...}}."""
-    scoped_clauses = clauses
-    if clauses_include:
-        scoped_clauses = [c for c in clauses if c.get("id") in clauses_include]
-    elif clauses_exclude:
-        scoped_clauses = [c for c in clauses if c.get("id") not in clauses_exclude]
+    scoped_clauses = select_clauses(clauses, clauses_include, clauses_exclude)
 
     clause_ids = [c["id"] for c in scoped_clauses] if (clauses_include or clauses_exclude) else None
 
@@ -243,8 +359,14 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
     total_cost = 0.0
     errors: List[str] = []
 
+    estimate = estimate_scan(files, regulation, scoped_clauses, provider)
+    projected = {f["path"]: f["cost"] for f in estimate["per_file"]}
+
     def _work(file_data):
-        return analyze_file(provider, cache, regulation, scoped_clauses, clause_ids, file_data)
+        return analyze_file(
+            provider, cache, regulation, scoped_clauses, clause_ids, file_data,
+            budget=budget, projected_cost=projected.get(file_data["path"], 0.0),
+        )
 
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, max(1, len(files)))) as executor:
         future_to_file = {executor.submit(_work, fd): fd for fd in files}
