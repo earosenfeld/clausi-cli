@@ -151,7 +151,8 @@ class MarkdownGenerator:
         failed = audit_meta.get("failed_files") or []
         not_assessed = audit_meta.get("not_assessed") or []
 
-        if not (unsupported or ignored or unreadable or truncated or failed or not_assessed):
+        if not (unsupported or ignored or unreadable or truncated or failed
+                or not_assessed or audit_meta.get("passes")):
             return []
 
         lines = ["## Coverage and Limits", "",
@@ -179,6 +180,16 @@ class MarkdownGenerator:
             for t in truncated[:10]:
                 lines.append(f"  - `{t.get('path')}` - {t.get('analyzed_chars')} of "
                              f"{t.get('original_chars')} characters analyzed")
+        passes = audit_meta.get("passes") or 1
+        if passes > 1:
+            lines += [f"- **Repeat analysis:** each file was analyzed {passes} times; "
+                      "every finding records how many passes detected it. A finding "
+                      "seen in a minority of passes is a weaker signal, not a weaker "
+                      "violation."]
+        elif audit_meta.get("passes") == 1:
+            lines += ["- **Single pass:** each file was analyzed once. Repeat runs of "
+                      "the same scan do not always return the same findings; use "
+                      "`--passes N` to measure how stable a result is."]
         if not_assessed:
             by_reason: Dict[str, int] = {}
             for entry in not_assessed:

@@ -98,7 +98,7 @@ class LocalCache:
     def generate_cache_key(self, file_content: str, regulation: str,
                             clauses: Optional[List[str]] = None,
                             provider: str = "", model: str = "",
-                            analysis_fingerprint: str = "") -> str:
+                            analysis_fingerprint: str = "", passes: int = 1) -> str:
         """Key one analysis result.
 
         analysis_fingerprint covers the prompt text and the clause definitions
@@ -113,6 +113,8 @@ class LocalCache:
             key_parts.append(clause_hash)
         if analysis_fingerprint:
             key_parts.append(analysis_fingerprint)
+        if passes and passes > 1:
+            key_parts.append(f"x{int(passes)}")
         return "scan_" + "_".join(key_parts)
 
     def _path_for(self, cache_key: str) -> Path:

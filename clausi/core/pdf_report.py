@@ -12,13 +12,14 @@ from textwrap import wrap
 from typing import Any, Dict, Iterable, List, Optional
 from xml.sax.saxutils import escape
 
-from reportlab.graphics.shapes import Drawing, Rect
+from reportlab.graphics.shapes import Drawing, Group, Line, Rect, String
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
     LongTable,
@@ -85,6 +86,127 @@ SEVERITY_COLORS = {
     "low": (GREEN, GREEN_BG),
     "info": (CYAN_DARK, BLUE_BG),
 }
+
+
+# --- charts -----------------------------------------------------------------
+#
+# Drawn by hand rather than with reportlab's chart classes: the report has a
+# tight visual system (two type sizes, one accent, flat fills, no gridlines)
+# and the stock charts bring their own axes, ticks and legends that fight it.
+# Every chart here degrades to an explicit "none" state rather than rendering
+# an empty frame, because a blank chart in a compliance report reads as a
+# clean result.
+
+BAR_ROW_HEIGHT = 15
+BAR_LABEL_WIDTH = 62
+BAR_VALUE_WIDTH = 20
+
+
+def _fit_label(text: str, width: float, font: str = "Helvetica-Bold",
+                size: float = 6.6) -> str:
+    """Trim a label to the space it actually has.
+
+    Character-count truncation is not enough: clause titles are proportional
+    text, and a 22-character cut still ran under the bars for the longer ones.
+    """
+    text = str(text)
+    if stringWidth(text, font, size) <= width:
+        return text
+    while text and stringWidth(text + "\u2026", font, size) > width:
+        text = text[:-1]
+    return (text.rstrip() + "\u2026") if text else ""
+
+
+def _bar_chart(rows: List[Any], width: float, label_width: float = BAR_LABEL_WIDTH,
+                min_track: bool = True) -> Drawing:
+    """Horizontal bars: [(label, value, color)], longest bar sets the scale.
+
+    Bars are proportional to the largest value, not to the total - the reader's
+    question here is "which is biggest", and a share-of-total scale flattens
+    every bar when one category dominates.
+    """
+    height = max(1, len(rows)) * BAR_ROW_HEIGHT
+    drawing = Drawing(width, height)
+    track_width = width - label_width - BAR_VALUE_WIDTH
+    peak = max([value for _, value, _ in rows] or [0]) or 1
+
+    for index, (label, value, color) in enumerate(rows):
+        y = height - (index + 1) * BAR_ROW_HEIGHT + 3
+        drawing.add(String(0, y + 1.5, _fit_label(label, label_width - 6),
+                            fontName="Helvetica-Bold", fontSize=6.6,
+                            fillColor=SLATE_700))
+        if min_track:
+            drawing.add(Rect(label_width, y, track_width, 7.5,
+                             fillColor=SLATE_50, strokeColor=None))
+        bar_width = (value / peak) * track_width
+        if value:
+            drawing.add(Rect(label_width, y, max(bar_width, 1.5), 7.5,
+                             fillColor=color, strokeColor=None))
+        drawing.add(String(width, y + 1.5, str(value), textAnchor="end",
+                            fontName="Helvetica-Bold", fontSize=7.2,
+                            fillColor=SLATE_900 if value else SLATE_300))
+    return drawing
+
+
+MATRIX_CELL = 17.0
+MATRIX_LABEL = 16.0
+
+
+def _risk_matrix(findings: List[Dict[str, Any]]) -> Optional[Drawing]:
+    """A 5x5 impact-by-likelihood grid with the findings placed in it.
+
+    The scores are already produced per finding and drive the risk rating, but
+    until now only ever appeared as two numbers inside a paragraph. Plotted,
+    they answer the question the numbers cannot: is the risk concentrated in
+    one corner, or spread out?
+    """
+    cells: Dict[Any, int] = {}
+    for finding in findings:
+        try:
+            impact = int(finding.get("impact_score") or 0)
+            likelihood = int(finding.get("likelihood_score") or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= impact <= 5 and 1 <= likelihood <= 5:
+            cells[(likelihood, impact)] = cells.get((likelihood, impact), 0) + 1
+    if not cells:
+        return None
+
+    width = MATRIX_LABEL + 5 * MATRIX_CELL
+    height = MATRIX_LABEL + 5 * MATRIX_CELL + 10
+    drawing = Drawing(width, height)
+
+    for likelihood in range(1, 6):
+        for impact in range(1, 6):
+            score = likelihood * impact
+            if score >= 20:
+                fill, ink = RED_BG, RED
+            elif score >= 12:
+                fill, ink = ORANGE_BG, ORANGE
+            elif score >= 6:
+                fill, ink = AMBER_BG, AMBER
+            else:
+                fill, ink = GREEN_BG, GREEN
+            x = MATRIX_LABEL + (likelihood - 1) * MATRIX_CELL
+            y = MATRIX_LABEL + (impact - 1) * MATRIX_CELL
+            drawing.add(Rect(x, y, MATRIX_CELL - 1.5, MATRIX_CELL - 1.5,
+                             fillColor=fill, strokeColor=WHITE, strokeWidth=1))
+            count = cells.get((likelihood, impact), 0)
+            if count:
+                drawing.add(String(x + (MATRIX_CELL - 1.5) / 2, y + 6.5, str(count),
+                                    textAnchor="middle", fontName="Helvetica-Bold",
+                                    fontSize=9.5, fillColor=ink))
+
+    for index in range(1, 6):
+        drawing.add(String(MATRIX_LABEL + (index - 0.5) * MATRIX_CELL - 1,
+                            MATRIX_LABEL - 9, str(index), textAnchor="middle",
+                            fontName="Helvetica", fontSize=6.4, fillColor=SLATE_500))
+        drawing.add(String(MATRIX_LABEL - 6, MATRIX_LABEL + (index - 0.6) * MATRIX_CELL,
+                            str(index), textAnchor="middle", fontName="Helvetica",
+                            fontSize=6.4, fillColor=SLATE_500))
+    drawing.add(String(MATRIX_LABEL, height - 4, "IMPACT (vertical) x LIKELIHOOD (horizontal)",
+                        fontName="Helvetica-Bold", fontSize=6.2, fillColor=SLATE_500))
+    return drawing
 
 
 class _ClausiCanvas(pdfcanvas.Canvas):
@@ -458,7 +580,7 @@ class PDFReportGenerator:
                 (str(files_scanned), "FILES ANALYZED"),
             ]),
             Spacer(1, 5 * mm),
-            self._executive_overview(counts, themes, clause_titles),
+            self._executive_overview(counts, themes, clause_titles, findings),
             Spacer(1, 5 * mm),
             Paragraph("Management actions", self.styles["h2"]),
             self._management_actions(findings),
@@ -778,16 +900,27 @@ class PDFReportGenerator:
         counts: Dict[str, int],
         themes: List[Dict[str, Any]],
         titles: Dict[str, str],
+        findings: List[Dict[str, Any]],
     ) -> Table:
+        severity_width = CONTENT_WIDTH * 0.30 - 8
+        themes_width = CONTENT_WIDTH * 0.38 - 16
         left = [
             Paragraph("RISK DISTRIBUTION", self.styles["eyebrow"]),
-            self._severity_compact(counts),
+            Spacer(1, 1.5 * mm),
+            self._severity_chart(counts, severity_width),
+        ]
+        middle = [
+            Paragraph("CONCENTRATED RISK AREAS", self.styles["eyebrow"]),
+            Spacer(1, 1.5 * mm),
+            self._themes_chart(themes[:5], titles, themes_width),
         ]
         right = [
-            Paragraph("CONCENTRATED RISK AREAS", self.styles["eyebrow"]),
-            self._themes_compact(themes[:4], titles),
-        ]
-        table = Table([[left, right]], colWidths=[CONTENT_WIDTH * 0.48, CONTENT_WIDTH * 0.52])
+            Paragraph("RISK PROFILE", self.styles["eyebrow"]),
+            Spacer(1, 1.5 * mm),
+        ] + self._risk_matrix_block(findings)
+        table = Table([[left, middle, right]],
+                       colWidths=[CONTENT_WIDTH * 0.30, CONTENT_WIDTH * 0.38,
+                                  CONTENT_WIDTH * 0.32])
         table.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (0, -1), 0),
@@ -825,6 +958,59 @@ class PDFReportGenerator:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         return table
+
+    @staticmethod
+    def _detection_label(finding: Dict[str, Any]) -> str:
+        """Reuse the TICKET slot for detection rate on a multi-pass scan.
+
+        A finding seen in 2 of 5 passes and one seen in 5 of 5 are not the same
+        claim, and on a single-pass scan there is nothing to report - so the
+        field only appears when it means something."""
+        return "DETECTED" if (finding.get("detection_passes") or 1) > 1 else "TICKET"
+
+    @staticmethod
+    def _detection_value(finding: Dict[str, Any], ticket: str) -> str:
+        passes = finding.get("detection_passes") or 1
+        if passes <= 1:
+            return ticket
+        return f"{finding.get('detection_count', 1)} of {passes} passes"
+
+    def _risk_matrix_block(self, findings: List[Dict[str, Any]]) -> List[Any]:
+        """Impact x likelihood, plotted. Returns a plain note when no finding
+        carried usable scores - an empty grid would imply the risk really is
+        nowhere, rather than that nothing was scored."""
+        matrix = _risk_matrix(findings)
+        if matrix is None:
+            return [Paragraph("No finding carried usable impact and likelihood "
+                               "scores.", self.styles["small"])]
+        return [
+            matrix,
+            Paragraph("Cell = findings at that impact and likelihood. Automated "
+                       "estimates; calibrate against your own risk appetite.",
+                       self.styles["small"]),
+        ]
+
+    def _severity_chart(self, counts: Dict[str, int], width: float) -> Any:
+        """Severity mix as bars. Empty levels keep their row so the ladder
+        stays readable as a ladder rather than collapsing to whatever was
+        found."""
+        rows = [
+            (severity.upper(), counts.get(severity, 0), SEVERITY_COLORS[severity][0])
+            for severity in ("critical", "high", "medium", "low", "info")
+        ]
+        return _bar_chart(rows, width)
+
+    def _themes_chart(self, themes: List[Dict[str, Any]], titles: Dict[str, str],
+                       width: float) -> Any:
+        if not themes:
+            return self._empty_state("No grouped risks", "No risk themes were available.")
+        rows = []
+        for theme in themes:
+            name = titles.get(_clean(theme["name"]), _clean(theme["name"]))
+            rows.append((name, int(theme["count"]), CYAN_DARK))
+        # Clause titles need most of the panel: the bars only ever compare a
+        # handful of small counts, so the label is the informative part.
+        return _bar_chart(rows, width, label_width=width * 0.55)
 
     def _severity_compact(self, counts: Dict[str, int]) -> Table:
         rows = []
@@ -1391,7 +1577,9 @@ class PDFReportGenerator:
                 Paragraph(f'<b>OWNER</b><br/>{_safe(owner)}', self.styles["small"]),
                 Paragraph(f'<b>TARGET</b><br/>{_safe(target)}', self.styles["small"]),
                 Paragraph(f'<b>STATUS</b><br/>{_safe(finding_status)}', self.styles["small"]),
-                Paragraph(f'<b>TICKET</b><br/>{_safe(ticket)}', self.styles["small"]),
+                Paragraph(f'<b>{_safe(self._detection_label(finding))}</b><br/>'
+                           f'{_safe(self._detection_value(finding, ticket))}',
+                           self.styles["small"]),
             ],
         ], colWidths=[CARD_INNER_WIDTH * 0.42, CARD_INNER_WIDTH * 0.18,
                        CARD_INNER_WIDTH * 0.18, CARD_INNER_WIDTH * 0.22])

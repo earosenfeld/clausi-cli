@@ -689,6 +689,9 @@ def list_models():
 @click.option("--skip-confirmation", "-y", is_flag=True, help="Skip the confirmation prompt")
 @click.option("--max-cost", type=float, help="Abort if the estimated cost exceeds this many dollars (e.g., --max-cost 1.00)")
 @click.option("--show-details", is_flag=True, help="Show per-file token estimates")
+@click.option("--passes", type=click.IntRange(1, 5), default=1,
+              help="Analyze each file N times and report how often each finding "
+                   "recurs. Costs N times as much; 1 pass is a sample, not a measurement.")
 @click.option("--min-severity", type=click.Choice(["info", "low", "medium", "high", "critical"]), default="info", help="Minimum severity to report")
 @click.option("--ignore", multiple=True, help="Ignore files/directories (can be given multiple times)")
 @click.option("--open-findings/--no-open-findings", default=None,
@@ -700,7 +703,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
           openai_model: Optional[str], claude_code: bool, codex: bool,
           select_clauses: bool, include_clauses: Optional[List[str]],
           exclude_clauses: Optional[List[str]], preset: Optional[str], verbose: bool,
-          skip_confirmation: bool, max_cost: Optional[float], show_details: bool, min_severity: str, ignore: Optional[List[str]],
+          skip_confirmation: bool, max_cost: Optional[float], show_details: bool, passes: int, min_severity: str, ignore: Optional[List[str]],
           open_findings: bool, show_markdown: bool, show_cache_stats: Optional[bool], no_cache: bool):
     """Run a compliance audit on your codebase - fully local (main command)."""
     provider, model = _resolve_provider_and_model(claude_model, openai_model, claude_code, codex)
@@ -775,6 +778,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             ),
             ai_provider,
             max_file_chars,
+            passes,
         )
     est_cost = sum(e["cost"] for e in estimates.values())
 
@@ -784,6 +788,11 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         "[dim]Assumes no cache hits. Each file's request also carries the full "
         "clause text, which is most of the cost on small files.[/dim]"
     )
+    if passes > 1:
+        console.print(
+            f"[dim]{passes} passes per file: each finding will carry how many "
+            "passes detected it.[/dim]"
+        )
     if show_details:
         for reg_code, est in estimates.items():
             console.print(
@@ -839,6 +848,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                     min_severity=min_severity,
                     budget=budget,
                     max_file_chars=max_file_chars,
+                    passes=passes,
                 )
         except Exception as e:  # noqa: BLE001
             # One regulation failing must not discard the regulations that
@@ -885,6 +895,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 "comparison_baseline": lifecycle["is_baseline"],
                 "regulation_pack_sha256": regulation_pack_hash(reg_data),
                 "max_file_chars": max_file_chars,
+                "passes": passes,
                 "not_assessed": result.get("not_assessed", []),
                 "truncated_files": result.get("truncated", []),
                 # Files that errored mid-scan are part of coverage, not just

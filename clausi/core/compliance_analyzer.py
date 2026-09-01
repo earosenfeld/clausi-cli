@@ -224,7 +224,8 @@ def scoped_content(content: str, max_file_chars: int = MAX_FILE_CHARS) -> str:
 
 def estimate_scan(files: List[Dict[str, Any]], regulation: str,
                    clauses: List[Dict[str, Any]], provider: AIProvider,
-                   max_file_chars: int = MAX_FILE_CHARS) -> Dict[str, Any]:
+                   max_file_chars: int = MAX_FILE_CHARS,
+                   passes: int = 1) -> Dict[str, Any]:
     """Estimate one regulation's scan. Returns per-file and total figures.
 
     Counts what is actually sent: the prompt scaffold for every file plus the
@@ -236,17 +237,20 @@ def estimate_scan(files: List[Dict[str, Any]], regulation: str,
         input_tokens = overhead + estimate_tokens(
             scoped_content(file_data["content"], max_file_chars)
         )
+        # Every pass is a full request: N passes cost N times as much.
+        input_tokens *= max(1, passes)
+        output_tokens = EST_OUTPUT_TOKENS_PER_CALL * max(1, passes)
         per_file.append({
             "path": file_data["path"],
             "input_tokens": input_tokens,
-            "output_tokens": EST_OUTPUT_TOKENS_PER_CALL,
-            "cost": provider.estimate_cost(input_tokens, EST_OUTPUT_TOKENS_PER_CALL),
+            "output_tokens": output_tokens,
+            "cost": provider.estimate_cost(input_tokens, output_tokens),
         })
     return {
         "prompt_overhead_tokens": overhead,
         "per_file": per_file,
         "input_tokens": sum(f["input_tokens"] for f in per_file),
-        "output_tokens": EST_OUTPUT_TOKENS_PER_CALL * len(per_file),
+        "output_tokens": sum(f["output_tokens"] for f in per_file),
         "cost": sum(f["cost"] for f in per_file),
     }
 
@@ -299,7 +303,8 @@ class CostBudget:
 def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
                   clauses: List[Dict[str, Any]], clause_ids: Optional[List[str]],
                   file_data: Dict[str, Any], budget: Optional["CostBudget"] = None,
-                  projected_cost: float = 0.0, max_file_chars: int = MAX_FILE_CHARS):
+                  projected_cost: float = 0.0, max_file_chars: int = MAX_FILE_CHARS,
+                  passes: int = 1):
     """Analyze a single file, using the cache when possible.
 
     Returns (findings, prompt_tokens, completion_tokens, cost).
@@ -315,6 +320,8 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
     cache_key = cache.generate_cache_key(
         content, regulation, clauses=clause_ids, provider=provider.name,
         model=provider.model, analysis_fingerprint=analysis_fingerprint(clauses),
+        # A 3-pass consensus result is not interchangeable with a 1-pass one.
+        passes=passes,
     )
 
     def _from_cache(entry):
@@ -345,7 +352,8 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
 
         try:
             findings, prompt_tokens, completion_tokens, cost, not_assessed = _analyze_uncached(
-                provider, cache, regulation, clauses, file_path, content, cache_key
+                provider, cache, regulation, clauses, file_path, content, cache_key,
+                passes=passes,
             )
         except Exception:
             # Release the reservation. A failed call produced no findings, and
@@ -359,15 +367,73 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         return findings, prompt_tokens, completion_tokens, cost, not_assessed
 
 
-def _analyze_uncached(provider, cache, regulation, clauses, file_path, content, cache_key):
-    """Call the provider and cache the result. Caller holds the key lock."""
-    result = provider.analyze_code(regulation, clauses, file_path, content)
-    findings = [_remap_finding(raw, file_path) for raw in result["findings"]]
-    not_assessed = _remap_not_assessed(result.get("not_assessed"), file_path)
+def merge_passes(pass_findings: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Merge repeated analyses of one file into findings with a detection rate.
 
-    prompt_tokens = result.get("prompt_tokens", 0)
-    completion_tokens = result.get("completion_tokens", 0)
-    cost = provider.estimate_cost(prompt_tokens, completion_tokens)
+    Measured 2026-09-01 over 10 identical runs of one fixture file: the number
+    of findings was stable (3 in 9 runs, 0 in one) but which clauses were
+    flagged was not - Article-12 in 90% of runs, Article-13 70%, Article-14
+    60%, Article-9 50%. A single pass is therefore a sample, not a
+    measurement, and reporting it as a measurement is the problem. Merging by
+    clause keeps every clause any pass flagged and records how often it was
+    seen, so a reader can tell a consistent finding from a coin flip.
+    """
+    total = len(pass_findings)
+    best: Dict[str, Dict[str, Any]] = {}
+    seen: Dict[str, int] = {}
+
+    for findings in pass_findings:
+        for clause in {f.get("clause_id", "") for f in findings}:
+            seen[clause] = seen.get(clause, 0) + 1
+        for finding in findings:
+            clause = finding.get("clause_id", "")
+            current = best.get(clause)
+            # Keep the most confident rendering of each clause; the others say
+            # the same thing less well.
+            if current is None or _confidence(finding) > _confidence(current):
+                best[clause] = finding
+
+    merged = []
+    for clause, finding in best.items():
+        finding["detection_passes"] = total
+        finding["detection_count"] = seen.get(clause, 0)
+        finding["detection_rate"] = round(seen.get(clause, 0) / total, 2) if total else 0.0
+        merged.append(finding)
+    return merged
+
+
+def _confidence(finding: Dict[str, Any]) -> float:
+    try:
+        return float(finding.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _analyze_uncached(provider, cache, regulation, clauses, file_path, content,
+                       cache_key, passes: int = 1):
+    """Call the provider and cache the result. Caller holds the key lock."""
+    pass_findings = []
+    not_assessed: List[Dict[str, Any]] = []
+    prompt_total = completion_total = 0
+    cost_total = 0.0
+
+    for _ in range(max(1, passes)):
+        result = provider.analyze_code(regulation, clauses, file_path, content)
+        pass_findings.append([_remap_finding(raw, file_path) for raw in result["findings"]])
+        # Abstentions from the last pass: they describe the same file, and
+        # merging them across passes would double-count the same clause.
+        not_assessed = _remap_not_assessed(result.get("not_assessed"), file_path)
+        prompt_total += result.get("prompt_tokens", 0)
+        completion_total += result.get("completion_tokens", 0)
+        cost_total += provider.estimate_cost(
+            result.get("prompt_tokens", 0), result.get("completion_tokens", 0)
+        )
+
+    findings = merge_passes(pass_findings)
+
+    prompt_tokens = prompt_total
+    completion_tokens = completion_total
+    cost = cost_total
     for f in findings:
         f["prompt_tokens"] = prompt_tokens
         f["completion_tokens"] = completion_tokens
@@ -386,6 +452,7 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
              min_severity: str = "info",
              budget: Optional["CostBudget"] = None,
              max_file_chars: int = MAX_FILE_CHARS,
+             passes: int = 1,
              on_progress=None) -> Dict[str, Any]:
     """Scan all files against one regulation's clauses. Returns
     {"findings": [...], "token_usage": {...}, "cache_stats": {...}}."""
@@ -400,14 +467,15 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
     total_cost = 0.0
     errors: List[str] = []
 
-    estimate = estimate_scan(files, regulation, scoped_clauses, provider, max_file_chars)
+    estimate = estimate_scan(files, regulation, scoped_clauses, provider,
+                              max_file_chars, passes)
     projected = {f["path"]: f["cost"] for f in estimate["per_file"]}
 
     def _work(file_data):
         return analyze_file(
             provider, cache, regulation, scoped_clauses, clause_ids, file_data,
             budget=budget, projected_cost=projected.get(file_data["path"], 0.0),
-            max_file_chars=max_file_chars,
+            max_file_chars=max_file_chars, passes=passes,
         )
 
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, max(1, len(files)))) as executor:

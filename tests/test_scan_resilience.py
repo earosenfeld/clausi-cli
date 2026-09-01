@@ -501,3 +501,59 @@ def test_coverage_section_reports_abstentions():
     assert "Clauses not assessed" in text
     assert "abstention is not a pass" in text
     assert "X-1" in text
+
+
+# --- run-to-run variance ---------------------------------------------------
+#
+# Measured 2026-09-01, 10 identical analyses of one fixture file: the finding
+# count was stable (3 in nine runs, 0 in one) but composition was not -
+# Article-12 appeared in 90% of runs, Article-13 70%, Article-14 60%,
+# Article-9 50%. One pass is a sample; --passes reports it as one.
+
+def test_merge_passes_records_detection_rate():
+    merged = compliance_analyzer.merge_passes([
+        [{"clause_id": "A", "confidence": 0.5}, {"clause_id": "B", "confidence": 0.9}],
+        [{"clause_id": "A", "confidence": 0.8}],
+        [{"clause_id": "A", "confidence": 0.6}],
+    ])
+    by_clause = {f["clause_id"]: f for f in merged}
+
+    # Every clause any pass flagged survives: a finding seen once is a weak
+    # signal, not a discarded one.
+    assert set(by_clause) == {"A", "B"}
+    assert by_clause["A"]["detection_count"] == 3
+    assert by_clause["A"]["detection_rate"] == 1.0
+    assert by_clause["B"]["detection_count"] == 1
+    assert round(by_clause["B"]["detection_rate"], 2) == 0.33
+    # The most confident rendering of a repeated clause is the one kept.
+    assert by_clause["A"]["confidence"] == 0.8
+
+
+def test_merge_passes_survives_unusable_confidence():
+    merged = compliance_analyzer.merge_passes([[{"clause_id": "A", "confidence": "high"}]])
+    assert merged[0]["detection_count"] == 1
+
+
+def test_multi_pass_costs_and_keys_scale():
+    provider = _PricedProvider(cost_per_call=0.10)
+    single = compliance_analyzer.estimate_scan(FILES, "Reg", CLAUSES, _StubProvider(), passes=1)
+    triple = compliance_analyzer.estimate_scan(FILES, "Reg", CLAUSES, _StubProvider(), passes=3)
+    assert triple["input_tokens"] == single["input_tokens"] * 3
+    assert triple["output_tokens"] == single["output_tokens"] * 3
+
+    cache = LocalCache(enabled=True, cache_dir=None)
+    # A 3-pass consensus result must not be served to a 1-pass scan.
+    assert cache.generate_cache_key("x", "Reg", passes=1) != \
+        cache.generate_cache_key("x", "Reg", passes=3)
+    assert provider.calls == []
+
+
+def test_scan_runs_each_file_the_requested_number_of_times():
+    provider = _PricedProvider(cost_per_call=0.01,
+                               findings=[{"clause_id": "X-1", "severity": "high"}])
+    result = run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+                      provider=provider, cache=_NullCache(), passes=4)
+
+    assert len(provider.calls) == 4
+    assert result["findings"][0]["detection_passes"] == 4
+    assert result["findings"][0]["detection_count"] == 4
