@@ -366,6 +366,24 @@ class TestLocalAgentProviders:
 
         assert "not found" in str(exc.value).lower()
 
+    def test_codex_scans_are_ephemeral(self):
+        """Per-file scans must not clutter the user's Codex task history."""
+        from clausi.core.ai_provider import CodexProvider
+
+        command = CodexProvider()._command("/usr/bin/codex")
+
+        assert command[:3] == ["/usr/bin/codex", "exec", "--ephemeral"]
+
+    def test_claude_code_scans_are_not_persisted(self):
+        """Per-file scans must not be imported into Codex as conversations."""
+        from clausi.core.ai_provider import ClaudeCodeProvider
+
+        command = ClaudeCodeProvider()._command("/usr/bin/claude")
+
+        assert command[:3] == [
+            "/usr/bin/claude", "-p", "--no-session-persistence",
+        ]
+
     def test_nonzero_exit_is_an_error_not_an_empty_result(self):
         """A crashed CLI must never look like a clean scan."""
         from clausi.core.ai_provider import AIProviderError, ClaudeCodeProvider
@@ -755,7 +773,7 @@ class TestConcurrentScanning:
                                       "explanation": "x", "location": "1"}],
                         "prompt_tokens": 10, "completion_tokens": 5}
 
-            def estimate_cost(self, p, c):
+            def estimate_cost(self, p, c, *args, **kwargs):
                 return 0.0
 
         cache = self._cache(tmp_path)
@@ -784,7 +802,7 @@ class TestConcurrentScanning:
             def analyze_code(self, regulation, clauses, file_path, code):
                 return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
 
-            def estimate_cost(self, p, c):
+            def estimate_cost(self, p, c, *args, **kwargs):
                 return 0.0
 
         cache = self._cache(tmp_path)
@@ -833,7 +851,7 @@ class TestConcurrentScanning:
                 time.sleep(0.2)
                 return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
 
-            def estimate_cost(self, p, c):
+            def estimate_cost(self, p, c, *args, **kwargs):
                 return 0.0
 
         cache = self._cache(tmp_path)
@@ -913,7 +931,7 @@ class TestScanCoverageManifest:
                 assert "[TRUNCATED]" in code
                 return {"findings": [], "prompt_tokens": 1, "completion_tokens": 1}
 
-            def estimate_cost(self, p, c):
+            def estimate_cost(self, p, c, *args, **kwargs):
                 return 0.0
 
         files = [{"path": "big.py", "content": "x" * (MAX_FILE_CHARS + 5000)}]

@@ -340,10 +340,15 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
     """Discover and filter files to analyze."""
     from clausi.utils.output import create_enhanced_progress_bar
 
+    # Resolved before the walk so ignored files are never read - see
+    # scanner.build_ignore_matcher.
+    ignore_list = list(ignore) if ignore else None
+    ignore_matcher = scanner.build_ignore_matcher(abs_path, ignore_list)
+
     with create_enhanced_progress_bar("Scanning project files...") as progress:
         task = progress.add_task("Scanning project files...", total=None)
         discovered_files, coverage = scanner.scan_directory_with_coverage(
-            abs_path, exclude_paths=exclude_paths
+            abs_path, exclude_paths=exclude_paths, ignore_matcher=ignore_matcher
         )
         progress.update(task, completed=True)
 
@@ -353,10 +358,10 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
 
     console.print(f"Found {len(discovered_files)} files to analyze")
 
-    ignore_list = list(ignore) if ignore else None
-    files, ignored_manifest = scanner.filter_ignored_files_with_manifest(
-        discovered_files, abs_path, ignore_list
-    )
+    files = discovered_files
+    ignored_manifest = coverage.get("ignored", [])
+    if ignored_manifest:
+        console.print(f"[green]Ignored {len(ignored_manifest)} file(s) by ignore rules[/green]")
 
     if not files:
         console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
@@ -784,10 +789,17 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
 
     console.print("\n[bold]Estimate (informational - billed directly by your provider):[/bold]")
     console.print(f"Files: {len(files)}  |  Regulations: {len(regulations)}  |  Est. cost: ${est_cost:.2f}")
-    console.print(
-        "[dim]Assumes no cache hits. Each file's request also carries the full "
-        "clause text, which is most of the cost on small files.[/dim]"
-    )
+    if any(e.get("prompt_caching") for e in estimates.values()):
+        console.print(
+            "[dim]Assumes no local cache hits. The clause text is sent once and "
+            "cached by the provider, so only the first file pays full price for "
+            "it.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]Assumes no cache hits. Each file's request also carries the full "
+            "clause text, which is most of the cost on small files.[/dim]"
+        )
     if passes > 1:
         console.print(
             f"[dim]{passes} passes per file: each finding will carry how many "
@@ -827,6 +839,8 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     all_findings: List[Dict[str, Any]] = []
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    total_cache_read = 0
+    total_cache_write = 0
     total_cost = 0.0
     all_errors: List[str] = []
     regulation_failures: List[str] = []
@@ -862,6 +876,8 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             f["regulation"] = reg_code
         total_prompt_tokens += result["token_usage"]["prompt_tokens"]
         total_completion_tokens += result["token_usage"]["completion_tokens"]
+        total_cache_read += result["token_usage"].get("cache_read_tokens", 0)
+        total_cache_write += result["token_usage"].get("cache_write_tokens", 0)
         total_cost += result["token_usage"]["cost"]
         all_errors.extend(result.get("errors", []))
 
@@ -1011,6 +1027,17 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         console.print(f"\n[green]{emoji('checkmark')} No findings - looks compliant![/green]")
 
     console.print(f"\n[bold]Actual Cost:[/bold] ${total_cost:.4f}")
+
+    if total_cache_read:
+        # What the scaffold would have cost at full rate, minus what the cached
+        # reads actually cost. Stated because an invisible optimization is one
+        # nobody can check.
+        saved = ai_provider.estimate_cost(total_cache_read, 0) - \
+            ai_provider.estimate_cost(0, 0, total_cache_read, 0)
+        console.print(
+            f"[dim]Prompt caching: {total_cache_read:,} tokens served from cache "
+            f"(saved ~${saved:.4f}); {total_cache_write:,} written.[/dim]"
+        )
 
     if budget.stopped:
         # The user asked for a hard ceiling and got one. Say so explicitly -

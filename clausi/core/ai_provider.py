@@ -16,20 +16,18 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 
-PROMPT_TEMPLATE = """You are a compliance auditor analyzing code for {regulation} compliance.
+# The prompt is split so everything that is identical for every file in a scan
+# comes first and byte-for-byte unchanged: instructions, the response schema,
+# the rules, and the clause text. Caching is a prefix match, so the previous
+# layout - which put the file's code in the middle, ahead of ~1,300 tokens of
+# schema and rules - made the stable prefix unusable and re-billed the whole
+# scaffold at full price on every single file.
+STATIC_PROMPT = """You are a compliance auditor analyzing code for {regulation} compliance.
 
 Your task is to identify potential compliance violations in the provided code.
 
 Focus on these specific clauses:
 {clause_list}
-
-File: {file_path}
-
-Code to analyze:
-```
-{code}
-```
-
 Respond with a JSON object in this exact format:
 {{
   "findings": [
@@ -89,6 +87,18 @@ Rules:
 
 IMPORTANT: Return ONLY the JSON object, with no explanatory text before or after it."""
 
+# The only part that changes per file, and therefore everything after the
+# cache breakpoint.
+FILE_PROMPT = """File: {file_path}
+
+Code to analyze:
+```
+{code}
+```"""
+
+PROMPT_TEMPLATE = STATIC_PROMPT + "\n\n" + FILE_PROMPT
+
+
 
 def clause_display_text(clause: Dict[str, Any]) -> str:
     """Build a human-readable text blob for a clause from its YAML fields."""
@@ -102,17 +112,30 @@ def clause_display_text(clause: Dict[str, Any]) -> str:
     return text
 
 
-def build_prompt(regulation: str, clauses: List[Dict[str, Any]], file_path: str, code: str) -> str:
-    """Build the compliance-analysis prompt for a single file."""
+def build_static_prompt(regulation: str, clauses: List[Dict[str, Any]]) -> str:
+    """The half of the prompt that is identical for every file in a scan."""
     clause_lines = []
     for clause in clauses:
         clause_id = clause.get("id", "")
         clause_lines.append(f"- {clause_id}: {clause_display_text(clause)}")
-    return PROMPT_TEMPLATE.format(
+    return STATIC_PROMPT.format(
         regulation=regulation,
         clause_list="\n".join(clause_lines),
-        file_path=file_path,
-        code=code,
+    )
+
+
+def build_file_prompt(file_path: str, code: str) -> str:
+    """The half that changes per file."""
+    return FILE_PROMPT.format(file_path=file_path, code=code)
+
+
+def build_prompt(regulation: str, clauses: List[Dict[str, Any]], file_path: str, code: str) -> str:
+    """Both halves as one string, for providers with no cache control of their
+    own (the local agent CLIs, which take a single prompt on stdin)."""
+    return (
+        build_static_prompt(regulation, clauses)
+        + "\n\n"
+        + build_file_prompt(file_path, code)
     )
 
 
@@ -131,6 +154,7 @@ def analysis_fingerprint(clauses: List[Dict[str, Any]]) -> str:
     """
     payload = {
         "prompt": PROMPT_TEMPLATE,
+        "layout": "static+file",
         "clauses": sorted(
             f"{c.get('id', '')}|{clause_display_text(c)}" for c in (clauses or [])
         ),
@@ -290,8 +314,25 @@ class AIProvider(ABC):
         "completion_tokens": int}."""
 
     @abstractmethod
-    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        """Estimate USD cost for the given token counts."""
+    def estimate_cost(self, input_tokens: int, output_tokens: int,
+                       cache_read_tokens: int = 0,
+                       cache_write_tokens: int = 0) -> float:
+        """Estimate USD cost for the given token counts.
+
+        Cached tokens are billed at a different rate from ordinary input, so a
+        provider that caches must price them separately or it will overstate
+        what the scan actually cost.
+        """
+
+    # Anthropic's published multipliers: a cache read costs a tenth of an
+    # ordinary input token, a write costs a quarter more. Providers without
+    # caching ignore both.
+    CACHE_READ_MULTIPLIER = 0.1
+    CACHE_WRITE_MULTIPLIER = 1.25
+
+    def supports_prompt_caching(self) -> bool:
+        """Whether repeated scaffold text is billed at a discount."""
+        return False
 
     @abstractmethod
     def generate_text(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
@@ -329,14 +370,25 @@ class ClaudeProvider(AIProvider):
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def analyze_code(self, regulation, clauses, file_path, code):
-        prompt = build_prompt(regulation, clauses, file_path, code)
+        static_prompt = build_static_prompt(regulation, clauses)
+        file_prompt = build_file_prompt(file_path, code)
+        # The clause text and instructions are identical for every file in the
+        # scan, so they go in a cached system block and the file goes after the
+        # breakpoint. Caching needs a ~1024-token prefix to engage; a small
+        # regulation may fall under that, in which case this silently behaves
+        # exactly as it did before.
         # No temperature: the Anthropic SDK removed sampling parameters from
         # messages.create() in 1.0, and current models reject them with a 400.
         response = call_with_retries(
             lambda: self._client.messages.create(
                 model=self.model,
                 max_tokens=MAX_ANALYSIS_TOKENS,
-                messages=[{"role": "user", "content": prompt}],
+                system=[{
+                    "type": "text",
+                    "text": static_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                messages=[{"role": "user", "content": file_prompt}],
             ),
             f"Claude analysis of {file_path}",
         )
@@ -348,11 +400,17 @@ class ClaudeProvider(AIProvider):
             raise AIProviderError(f"Could not parse Claude response as JSON: {e}") from e
 
         usage = getattr(response, "usage", None)
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
         return {
             "findings": parsed.get("findings", []),
             "not_assessed": parsed.get("not_assessed", []),
-            "prompt_tokens": getattr(usage, "input_tokens", estimate_tokens(prompt)),
+            "prompt_tokens": getattr(usage, "input_tokens", estimate_tokens(file_prompt)),
             "completion_tokens": getattr(usage, "output_tokens", estimate_tokens(text)),
+            # Billed differently from ordinary input: reads are ~0.1x, writes
+            # ~1.25x. Reported so the scan's cost figure stays true.
+            "cache_read_tokens": cache_read,
+            "cache_write_tokens": cache_write,
         }
 
     @staticmethod
@@ -376,9 +434,18 @@ class ClaudeProvider(AIProvider):
                 return text
         raise AIProviderError(f"Claude returned no text content for {description}")
 
-    def estimate_cost(self, input_tokens, output_tokens):
+    def supports_prompt_caching(self) -> bool:
+        return True
+
+    def estimate_cost(self, input_tokens, output_tokens,
+                       cache_read_tokens=0, cache_write_tokens=0):
         in_rate, out_rate = self.PRICING.get(self.model, self.PRICING[self.DEFAULT_MODEL])
-        return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
+        return (
+            (input_tokens / 1_000_000) * in_rate
+            + (output_tokens / 1_000_000) * out_rate
+            + (cache_read_tokens / 1_000_000) * in_rate * self.CACHE_READ_MULTIPLIER
+            + (cache_write_tokens / 1_000_000) * in_rate * self.CACHE_WRITE_MULTIPLIER
+        )
 
     def generate_text(self, system_prompt, user_prompt):
         response = call_with_retries(
@@ -451,9 +518,14 @@ class OpenAIProvider(AIProvider):
             "completion_tokens": getattr(usage, "completion_tokens", estimate_tokens(text)),
         }
 
-    def estimate_cost(self, input_tokens, output_tokens):
+    def estimate_cost(self, input_tokens, output_tokens,
+                       cache_read_tokens=0, cache_write_tokens=0):
         in_rate, out_rate = self.PRICING.get(self.model, self.PRICING[self.DEFAULT_MODEL])
-        return (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
+        return (
+            (input_tokens / 1_000_000) * in_rate
+            + (output_tokens / 1_000_000) * out_rate
+            + (cache_read_tokens / 1_000_000) * in_rate * self.CACHE_READ_MULTIPLIER
+        )
 
     def generate_text(self, system_prompt, user_prompt):
         response = call_with_retries(
@@ -579,7 +651,8 @@ class LocalAgentProvider(AIProvider):
             "completion_tokens": estimate_tokens(text),
         }
 
-    def estimate_cost(self, input_tokens, output_tokens):
+    def estimate_cost(self, input_tokens, output_tokens,
+                       cache_read_tokens=0, cache_write_tokens=0):
         # Billed by the user's existing plan, not per-token by us.
         return 0.0
 
@@ -602,7 +675,9 @@ class ClaudeCodeProvider(LocalAgentProvider):
     install_hint = "Install it from https://claude.com/claude-code and run `claude` once to sign in."
 
     def _command(self, executable: str) -> List[str]:
-        cmd = [executable, "-p"]
+        # A scan invokes Claude once per file, so these machine-to-machine calls
+        # must not become resumable conversations that Codex later imports.
+        cmd = [executable, "-p", "--no-session-persistence"]
         if self.model:
             cmd += ["--model", self.model]
         return cmd
@@ -618,7 +693,10 @@ class CodexProvider(LocalAgentProvider):
 
     def _command(self, executable: str) -> List[str]:
         # `codex exec` with no prompt argument reads instructions from stdin.
-        cmd = [executable, "exec"]
+        # Scan calls are implementation details, not user conversations. Keep
+        # them out of the Codex task history, especially because a repository
+        # scan starts one invocation per file (and may retry malformed JSON).
+        cmd = [executable, "exec", "--ephemeral"]
         if self.model:
             cmd += ["-m", self.model]
         return cmd

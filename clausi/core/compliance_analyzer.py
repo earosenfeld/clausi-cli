@@ -26,6 +26,16 @@ from clausi.core.cache import LocalCache
 MAX_FILE_CHARS = 60000
 MAX_WORKERS = 8
 
+# Anthropic will not cache a prefix shorter than roughly this, and does so
+# silently - a small regulation simply gets the old, uncached behaviour.
+MIN_CACHEABLE_TOKENS = 1024
+
+# A cache hit costs nothing and spends no tokens.
+NO_USAGE = {
+    "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0,
+    "cache_read_tokens": 0, "cache_write_tokens": 0,
+}
+
 # The canonical severity ladder, low to high. Everything downstream - report
 # grouping, the --min-severity filter, risk scoring - assumes a value from this
 # list, so normalization happens once, at the provider boundary.
@@ -232,22 +242,43 @@ def estimate_scan(files: List[Dict[str, Any]], regulation: str,
     (possibly truncated) file text, and a flat per-call output allowance.
     """
     overhead = prompt_overhead_tokens(regulation, clauses)
+    # With prompt caching the scaffold is written once and then read back at a
+    # tenth of the price for every remaining file - which on small source files
+    # is most of the bill. Quoting the full rate for every file would now
+    # overstate a Claude scan by roughly the cache discount.
+    cached = getattr(provider, "supports_prompt_caching", lambda: False)()
     per_file = []
-    for file_data in files:
-        input_tokens = overhead + estimate_tokens(
+    for index, file_data in enumerate(files):
+        overhead_tokens = overhead
+        cache_read = cache_write = 0
+        if cached and overhead >= MIN_CACHEABLE_TOKENS:
+            overhead_tokens = 0
+            if index == 0:
+                cache_write = overhead
+            else:
+                cache_read = overhead
+        input_tokens = overhead_tokens + estimate_tokens(
             scoped_content(file_data["content"], max_file_chars)
         )
         # Every pass is a full request: N passes cost N times as much.
-        input_tokens *= max(1, passes)
-        output_tokens = EST_OUTPUT_TOKENS_PER_CALL * max(1, passes)
+        multiplier = max(1, passes)
+        input_tokens *= multiplier
+        cache_read *= multiplier
+        output_tokens = EST_OUTPUT_TOKENS_PER_CALL * multiplier
         per_file.append({
             "path": file_data["path"],
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "cost": provider.estimate_cost(input_tokens, output_tokens),
+            "cache_read_tokens": cache_read,
+            "cache_write_tokens": cache_write,
+            "cost": provider.estimate_cost(input_tokens, output_tokens,
+                                            cache_read, cache_write),
         })
     return {
         "prompt_overhead_tokens": overhead,
+        "prompt_caching": cached and overhead >= MIN_CACHEABLE_TOKENS,
+        "cache_read_tokens": sum(f["cache_read_tokens"] for f in per_file),
+        "cache_write_tokens": sum(f["cache_write_tokens"] for f in per_file),
         "per_file": per_file,
         "input_tokens": sum(f["input_tokens"] for f in per_file),
         "output_tokens": sum(f["output_tokens"] for f in per_file),
@@ -330,7 +361,7 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
             f["file_path"] = file_path
             f["cached"] = True
         # Entries written before abstention shipped have no not_assessed key.
-        return findings, 0, 0, 0.0, entry.get("not_assessed") or []
+        return findings, dict(NO_USAGE), entry.get("not_assessed") or []
 
     cached = cache.get(cache_key)
     if cached is not None:
@@ -351,7 +382,7 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
             budget.reserve(projected_cost)
 
         try:
-            findings, prompt_tokens, completion_tokens, cost, not_assessed = _analyze_uncached(
+            findings, usage, not_assessed = _analyze_uncached(
                 provider, cache, regulation, clauses, file_path, content, cache_key,
                 passes=passes,
             )
@@ -363,8 +394,8 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
                 budget.record(projected_cost, 0.0)
             raise
         if budget is not None:
-            budget.record(projected_cost, cost)
-        return findings, prompt_tokens, completion_tokens, cost, not_assessed
+            budget.record(projected_cost, usage["cost"])
+        return findings, usage, not_assessed
 
 
 def merge_passes(pass_findings: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -415,6 +446,7 @@ def _analyze_uncached(provider, cache, regulation, clauses, file_path, content,
     pass_findings = []
     not_assessed: List[Dict[str, Any]] = []
     prompt_total = completion_total = 0
+    cache_read_total = cache_write_total = 0
     cost_total = 0.0
 
     for _ in range(max(1, passes)):
@@ -426,8 +458,11 @@ def _analyze_uncached(provider, cache, regulation, clauses, file_path, content,
         prompt_total += result.get("prompt_tokens", 0)
         completion_total += result.get("completion_tokens", 0)
         cost_total += provider.estimate_cost(
-            result.get("prompt_tokens", 0), result.get("completion_tokens", 0)
+            result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
+            result.get("cache_read_tokens", 0), result.get("cache_write_tokens", 0),
         )
+        cache_read_total += result.get("cache_read_tokens", 0)
+        cache_write_total += result.get("cache_write_tokens", 0)
 
     findings = merge_passes(pass_findings)
 
@@ -442,7 +477,13 @@ def _analyze_uncached(provider, cache, regulation, clauses, file_path, content,
         f["provider"] = provider.name
 
     cache.set(cache_key, {"findings": findings, "not_assessed": not_assessed})
-    return findings, prompt_tokens, completion_tokens, cost, not_assessed
+    return findings, {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cost": cost,
+        "cache_read_tokens": cache_read_total,
+        "cache_write_tokens": cache_write_total,
+    }, not_assessed
 
 
 def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[str, Any]],
@@ -464,6 +505,8 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
     all_not_assessed: List[Dict[str, Any]] = []
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    total_cache_read = 0
+    total_cache_write = 0
     total_cost = 0.0
     errors: List[str] = []
 
@@ -485,12 +528,14 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
             file_data = future_to_file[future]
             completed += 1
             try:
-                findings, prompt_tokens, completion_tokens, cost, not_assessed = future.result()
+                findings, usage, not_assessed = future.result()
                 all_findings.extend(findings)
                 all_not_assessed.extend(not_assessed)
-                total_prompt_tokens += prompt_tokens
-                total_completion_tokens += completion_tokens
-                total_cost += cost
+                total_prompt_tokens += usage["prompt_tokens"]
+                total_completion_tokens += usage["completion_tokens"]
+                total_cache_read += usage["cache_read_tokens"]
+                total_cache_write += usage["cache_write_tokens"]
+                total_cost += usage["cost"]
             except AIProviderError as e:
                 errors.append(f"{file_data['path']}: {e}")
             except Exception as e:  # noqa: BLE001 - see below
@@ -524,6 +569,8 @@ def run_scan(files: List[Dict[str, Any]], regulation: str, clauses: List[Dict[st
         "completion_tokens": total_completion_tokens,
         "total_tokens": total_prompt_tokens + total_completion_tokens,
         "cost": total_cost,
+        "cache_read_tokens": total_cache_read,
+        "cache_write_tokens": total_cache_write,
         "provider": provider.name,
         "model": provider.model,
     }

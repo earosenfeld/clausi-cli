@@ -50,7 +50,8 @@ MAX_MANIFEST_EXAMPLES = 10
 
 
 def scan_directory_with_coverage(
-    path: str, exclude_paths: Optional[Iterable[Path]] = None
+    path: str, exclude_paths: Optional[Iterable[Path]] = None,
+    ignore_matcher=None,
 ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     """Discover analyzable files and record everything that was not analyzed.
 
@@ -63,6 +64,7 @@ def scan_directory_with_coverage(
     unsupported_examples: Dict[str, List[str]] = {}
     excluded_dirs: Dict[str, int] = {}
     unreadable: List[Dict[str, str]] = []
+    ignored: List[Dict[str, str]] = []
     root_path = Path(path)
 
     # Clausi's own output and state directories. A repeat scan would otherwise
@@ -117,6 +119,12 @@ def scan_directory_with_coverage(
                     examples.append(rel_path)
                 continue
 
+            # Checked before the read, not after.
+            rule = ignore_matcher(rel_path) if ignore_matcher else None
+            if rule:
+                ignored.append({"path": rel_path, "rule": rule})
+                continue
+
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -137,6 +145,7 @@ def scan_directory_with_coverage(
         "skipped_unsupported_examples": unsupported_examples,
         "skipped_excluded_directories": dict(sorted(excluded_dirs.items(), key=lambda kv: -kv[1])),
         "unreadable": unreadable,
+        "ignored": ignored,
     }
     return files_to_analyze, coverage
 
@@ -184,6 +193,46 @@ def parse_clausiignore_file(clausiignore_path: Path) -> Optional[Any]:
     except Exception as e:
         console.print(f"[yellow]Warning: Could not parse .clausiignore file: {e}[/yellow]")
         return None
+
+
+def build_ignore_matcher(project_path: str,
+                          ignore_patterns: Optional[List[str]] = None):
+    """Return a callable(rel_path) -> rule name or None.
+
+    Pulled out of filter_ignored_files_with_manifest so the walk can consult
+    the ignore rules *before* reading a file. Reading first and discarding
+    after meant a repo whose .clausiignore excludes vendored or generated
+    trees still paid the full read for every one of those files, and held them
+    all in memory at once.
+    """
+    ignore_spec = None
+    clausiignore_path = find_clausiignore_file(project_path)
+    if clausiignore_path:
+        ignore_spec = parse_clausiignore_file(clausiignore_path)
+        if ignore_spec:
+            console.print(f"[green]Using .clausiignore file: {clausiignore_path}[/green]")
+
+    cmd_ignore_spec = None
+    if ignore_patterns and pathspec:
+        try:
+            cmd_ignore_spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
+            console.print(
+                f"[green]Using command-line ignore patterns: {', '.join(ignore_patterns)}[/green]"
+            )
+        except Exception as e:  # noqa: BLE001 - a bad pattern must not end the scan
+            console.print(f"[yellow]Warning: Could not parse command-line ignore patterns: {e}[/yellow]")
+
+    if not ignore_spec and not cmd_ignore_spec:
+        return None
+
+    def _match(rel_path: str) -> Optional[str]:
+        if ignore_spec and ignore_spec.match_file(rel_path):
+            return ".clausiignore"
+        if cmd_ignore_spec and cmd_ignore_spec.match_file(rel_path):
+            return "--ignore pattern"
+        return None
+
+    return _match
 
 
 def filter_ignored_files_with_manifest(
