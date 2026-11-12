@@ -1,6 +1,6 @@
 """Clausi - AI compliance auditing CLI."""
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 __author__ = "Clausi"
 __email__ = "support@clausi.ai"
 
