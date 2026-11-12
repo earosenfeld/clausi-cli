@@ -291,7 +291,10 @@ def filter_ignored_files_with_manifest(
 
     ignored_count = len(files) - len(filtered_files)
     if ignored_count > 0:
-        console.print(f"[green]Ignored {ignored_count} files based on .clausiignore patterns[/green]")
+        console.print(
+            f"[green]Ignored {ignored_count} file"
+            f"{'' if ignored_count == 1 else 's'} by ignore rules[/green]"
+        )
 
     return filtered_files, ignored_manifest
 

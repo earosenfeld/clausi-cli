@@ -350,6 +350,11 @@ def _validate_regulations(regulations: List[str], path: str) -> None:
     sys.exit(2)
 
 
+def _plural(count: int, noun: str = "file") -> str:
+    """"1 file" / "2 files" - "Found 1 files" reads as a bug in the counter."""
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
 def _summarize(text: str, limit: int = 80) -> str:
     """Trim a finding's explanation for the terminal table.
 
@@ -396,7 +401,7 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
         console.print("[yellow]No files found to analyze![/yellow]")
         sys.exit(1)
 
-    console.print(f"Found {len(discovered_files)} files to analyze")
+    console.print(f"Found {_plural(len(discovered_files))} to analyze")
 
     files = discovered_files
     ignored_manifest = coverage.get("ignored", [])
@@ -407,7 +412,7 @@ def _discover_and_filter_files(abs_path: str, ignore: Optional[tuple],
         console.print("[yellow]No files found to analyze after applying ignore patterns![/yellow]")
         sys.exit(1)
 
-    console.print(f"Analyzing {len(files)} files after filtering")
+    console.print(f"Analyzing {_plural(len(files))} after filtering")
     file_types: Dict[str, int] = {}
     for file_data in files:
         extension = str(file_data.get("type") or "unknown").lower()

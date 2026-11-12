@@ -692,3 +692,13 @@ def test_summarize_never_cuts_mid_word(text, limit, expected):
     from clausi.cli import _summarize
 
     assert _summarize(text, limit) == expected
+
+
+@pytest.mark.parametrize("count,expected", [
+    (0, "0 files"), (1, "1 file"), (2, "2 files"),
+])
+def test_plural_agrees_with_count(count, expected):
+    """"Found 1 files to analyze" reads as a broken counter."""
+    from clausi.cli import _plural
+
+    assert _plural(count) == expected
