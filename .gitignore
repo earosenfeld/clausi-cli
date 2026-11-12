@@ -169,3 +169,4 @@ CLAUDE/
 
 # Codex session config (machine-local, mirrors how .claude/ is treated)
 .codex/
+_verify/
