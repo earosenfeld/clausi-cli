@@ -662,10 +662,10 @@ class ClausInteractiveTUI:
         elif "OpenAI" in provider_choice:
             console.print()
             openai_models = [
-                questionary.Choice("gpt-4o (Recommended - best balance)", shortcut_key="1"),
-                questionary.Choice("gpt-4o-mini (Faster, cheaper)", shortcut_key="2"),
-                questionary.Choice("gpt-4-turbo (Previous generation)", shortcut_key="3"),
-                questionary.Choice("o1-preview (Advanced reasoning, expensive)", shortcut_key="4")
+                questionary.Choice("gpt-6.1-sol (Recommended - best balance)", shortcut_key="1"),
+                questionary.Choice("gpt-6-astra (Most capable, most expensive)", shortcut_key="2"),
+                questionary.Choice("gpt-6.1-terra (Faster, cheaper)", shortcut_key="3"),
+                questionary.Choice("gpt-6-luna (Fastest, lowest cost)", shortcut_key="4")
             ]
             model_choice = questionary.select(
                 "Select OpenAI model:",

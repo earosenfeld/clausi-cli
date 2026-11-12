@@ -83,7 +83,7 @@ def get_ai_provider() -> str:
 
 DEFAULT_MODELS = {
     "claude": "claude-opus-5",
-    "openai": "gpt-4o",
+    "openai": "gpt-6.1-sol",
 }
 
 

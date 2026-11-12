@@ -119,7 +119,7 @@ Clausi - AI Compliance Auditing
 
 1. **Select project location** - current directory, file explorer, or manual path
 2. **Choose AI provider** - Claude (Anthropic key) or OpenAI (OpenAI key)
-3. **Select model** - e.g. claude-opus-5, gpt-4o
+3. **Select model** - e.g. claude-opus-5, gpt-6.1-sol
 4. **Choose regulations** - one, several, or a custom regulation
 5. **Select preset** (optional) - all clauses, critical-only, or high-priority
 
@@ -228,7 +228,7 @@ clausi docs generate --codex
 
 # Or force an API-key provider
 clausi docs generate --claude
-clausi docs generate --openai gpt-4o
+clausi docs generate --openai gpt-6.1-sol
 
 # Output elsewhere / scope files
 clausi docs generate -o ./docs --exclude "tests/*"
@@ -313,7 +313,7 @@ export OPENAI_API_KEY=sk-your-key-here
 clausi scan . --openai
 
 # Or specify a model
-clausi scan . --openai gpt-4o
+clausi scan . --openai gpt-6.1-sol
 ```
 
 ### Auto-detection
@@ -499,7 +499,11 @@ clausi --help       Show help
 | `--show-cache-stats` | Show cache hit/miss statistics |
 | `--no-cache` | Disable the local cache for this run |
 | `--skip-confirmation, -y` | Skip cost confirmation prompt |
-| `--max-cost FLOAT` | Abort if the rough estimate exceeds this |
+| `--max-cost FLOAT` | Hard spend ceiling. Refuses to start if the estimate exceeds it, and stops mid-scan if real usage reaches it (exits 2) |
+| `--passes N` | Analyze each file N times (1-5) and report how often each finding recurs. Costs N times as much |
+| `--min-severity LEVEL` | Only report findings at or above this severity |
+| `--show-details` | Show per-file token and cost estimates |
+| `--select-clauses` | Pick clauses interactively before scanning |
 | `--ignore PATTERN` | Ignore files/dirs (can repeat) |
 | `-o, --output PATH` | Output directory |
 | `-v, --verbose` | Verbose output |

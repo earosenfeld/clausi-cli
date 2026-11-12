@@ -639,3 +639,56 @@ def test_ignored_files_are_never_read():
     assert coverage["ignored"] == [{"path": "skip.py", "rule": "--ignore pattern"}]
     # The ignored file's content was never loaded.
     assert all("skip" not in f["content"] for f in files)
+
+
+# --- CLI surface -----------------------------------------------------------
+#
+# Polish defects that a user sees before anything else.
+
+def test_cli_module_does_not_shadow_builtins():
+    """A module-level `def set(...)` rebound the builtin for all of cli.py.
+
+    Every set() call after it raised a Click usage error instead of building a
+    set - which is how `clausi scan -r BOGUS` ended up printing
+    "Got unexpected extra arguments" and exiting 0. Click commands are named
+    for the function, so the decorator must carry the CLI name instead.
+    """
+    import ast
+    import builtins
+
+    source = Path("clausi/cli.py").read_text(encoding="utf-8")
+    shadowed = [
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and hasattr(builtins, node.name)
+    ]
+    assert shadowed == [], f"cli.py shadows builtins: {shadowed}"
+
+
+def test_unknown_regulation_exits_nonzero_and_lists_valid_ones():
+    from click.testing import CliRunner
+
+    from clausi.cli import cli
+
+    result = CliRunner().invoke(
+        cli, ["scan", "tests/fixtures", "-r", "DEFINITELY-NOT-REAL", "--claude-code", "-y"]
+    )
+
+    # Exiting 0 on a bad regulation would let CI read a scan that never ran as
+    # a pass.
+    assert result.exit_code == 2
+    assert "DEFINITELY-NOT-REAL" in result.output
+    assert "EU-AIA" in result.output, "should name the valid regulations"
+
+
+@pytest.mark.parametrize("text,limit,expected", [
+    ("short text", 80, "short text"),
+    ("a" * 100, 10, "aaaaaaaaaa..."),
+    ("the quick brown fox jumps", 12, "the quick..."),
+    ("", 80, ""),
+])
+def test_summarize_never_cuts_mid_word(text, limit, expected):
+    """Fixed-width slicing left words sliced in half ("assess_risk onl")."""
+    from clausi.cli import _summarize
+
+    assert _summarize(text, limit) == expected

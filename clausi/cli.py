@@ -324,6 +324,46 @@ def _setup_clause_scoping(select_clauses: bool, include_clauses: Optional[tuple]
     return clauses_include, clauses_exclude
 
 
+def _validate_regulations(regulations: List[str], path: str) -> None:
+    """Reject unknown regulation codes before any work is done.
+
+    This used to fail only once the scan reached clause resolution - after
+    announcing the bogus name, walking the tree and reading every file - and
+    then exited 0 with a bare "Unknown regulation". Validate first, name the
+    valid options, and exit non-zero.
+    """
+    # get_regulations() already merges bundled packs with custom ones.
+    available = set(get_regulations())
+    unknown = [r for r in regulations if r not in available]
+    if not unknown:
+        return
+    plural = "s" if len(unknown) > 1 else ""
+    console.print(
+        f"[red]Error: unknown regulation{plural}: "
+        f"{', '.join(sorted(unknown))}[/red]"
+    )
+    console.print(f"[cyan]Available:[/cyan] {', '.join(sorted(available))}")
+    console.print(
+        "[dim]Custom packs load from ~/.clausi/custom_regulations/ and "
+        "<project>/.clausi/regulations/.[/dim]"
+    )
+    sys.exit(2)
+
+
+def _summarize(text: str, limit: int = 80) -> str:
+    """Trim a finding's explanation for the terminal table.
+
+    Cutting at a fixed character count left words sliced in half ("assess_risk
+    onl", "refu"), which reads as a rendering bug rather than a summary. Cut at
+    a word boundary instead and mark the trim.
+    """
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit].rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    return (clipped or text[:limit].rstrip()) + "..."
+
+
 def _reproduction_command() -> str:
     """The command a reader can actually re-run.
 
@@ -483,12 +523,12 @@ def cli(ctx):
 
     \b
     Quick Examples:
-      clausi                                    # Interactive mode
-      clausi scan . -r EU-AIA --claude-code    # Use local Claude Code, no API key
-      clausi scan . -r EU-AIA --codex          # Use local Codex CLI, no API key
-      clausi scan . -r EU-AIA -r GDPR          # Auto-detect key or local agent
-      clausi scan . --claude                   # Force Claude via API key
-      clausi scan . --openai gpt-4o            # Force OpenAI via API key
+      clausi                                 # Interactive mode
+      clausi scan . -r EU-AIA --claude-code  # Local Claude Code, no API key
+      clausi scan . -r EU-AIA --codex        # Local Codex CLI, no API key
+      clausi scan . -r EU-AIA -r GDPR        # Auto-detect key or local agent
+      clausi scan . --claude                 # Force Claude via API key
+      clausi scan . --openai                 # Force OpenAI via API key
     """
     create_default_config()
 
@@ -502,7 +542,7 @@ def config():
     pass
 
 
-@config.command()
+@config.command("set")
 @click.option("--openai-key", help="Set your OpenAI API key")
 @click.option("--anthropic-key", help="Set your Anthropic API key")
 @click.option("--ai-provider", type=click.Choice(["claude", "openai"]), help="Set default AI provider")
@@ -512,7 +552,10 @@ def config():
 @click.option("--output-dir", type=click.Path(), help="Set default report output directory")
 @click.option("--regulations", multiple=True, help="Set selected regulations (can be given multiple times)")
 @click.option("--cache/--no-cache", "cache_enabled", default=None, help="Enable/disable the local scan cache")
-def set(openai_key: Optional[str], anthropic_key: Optional[str], ai_provider: Optional[str], ai_model: Optional[str],
+# Named set_config, not set: a module-level "def set" rebinds the builtin for
+# the whole module, and every set() call after it raises a Click usage error
+# instead of building a set. The command is still "clausi config set".
+def set_config(openai_key: Optional[str], anthropic_key: Optional[str], ai_provider: Optional[str], ai_model: Optional[str],
         company_name: Optional[str], company_logo: Optional[str], output_dir: Optional[str],
         regulations: Optional[List[str]], cache_enabled: Optional[bool]):
     """Set configuration values."""
@@ -642,7 +685,10 @@ def cache_stats_cmd():
     limit_mb = cfg.get("cache", {}).get("max_size_mb", 500)
     console.print(f"Cache directory: [bold]{cache_dir}[/bold]")
     console.print(f"Cached results: [bold]{count}[/bold]")
-    console.print(f"Size on disk: [bold]{size_mb:.1f} MB[/bold] (cap {limit_mb:.0f} MB)")
+    # Real caches sit well under a megabyte, and "0.0 MB" next to a live
+    # entry count reads as a broken counter.
+    size_text = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb * 1024:.0f} KB"
+    console.print(f"Size on disk: [bold]{size_text}[/bold] (cap {limit_mb:.0f} MB)")
 
 
 @cli.group()
@@ -661,18 +707,22 @@ def list_models():
     table.add_column("Cost/1M tokens", style="magenta")
     table.add_column("Recommended", style="white")
 
+    # Rates verified 2026-11-11 against each provider's published pricing; they
+    # must stay in step with the PRICING tables in core/ai_provider.py, which
+    # are what actually drive the estimate and the --max-cost ceiling.
     table.add_row("Claude", "claude-opus-5", "1M", "$5 / $25", "Default")
     table.add_row("Claude", "claude-sonnet-5", "1M", "$3 / $15", "Cheaper")
     table.add_row("Claude", "claude-haiku-4-5", "200k", "$1 / $5", "Fastest")
-    table.add_row("OpenAI", "gpt-4o", "128k", "$5 / $15", "Default")
-    table.add_row("OpenAI", "gpt-4-turbo", "128k", "$10 / $30", "")
-    table.add_row("OpenAI", "gpt-4", "128k", "$30 / $60", "")
+    table.add_row("OpenAI", "gpt-6.1-sol", "1M", "$2 / $10", "Default")
+    table.add_row("OpenAI", "gpt-6-astra", "1M", "$10 / $50", "Most capable")
+    table.add_row("OpenAI", "gpt-6.1-terra", "1M", "$1 / $5", "Cheaper")
+    table.add_row("OpenAI", "gpt-6-luna", "1M", "$0.10 / $0.50", "Fastest")
 
     console.print(table)
     console.print("\n[yellow]Usage:[/yellow]")
-    console.print("  [cyan]clausi scan . --claude[/cyan]                           # Default Claude model")
-    console.print("  [cyan]clausi scan . --claude claude-sonnet-5[/cyan]            # Specify model")
-    console.print("  [cyan]clausi scan . --openai gpt-4o[/cyan]                     # Use OpenAI")
+    console.print("  [cyan]clausi scan . --claude[/cyan]                  # Default Claude model")
+    console.print("  [cyan]clausi scan . --claude claude-sonnet-5[/cyan]  # Specify a model")
+    console.print("  [cyan]clausi scan . --openai[/cyan]                  # Default OpenAI model")
     console.print("\n[yellow]Set API keys:[/yellow]")
     console.print("  [cyan]clausi config set --anthropic-key sk-ant-...[/cyan]")
     console.print("  [cyan]clausi config set --openai-key sk-...[/cyan]")
@@ -683,7 +733,7 @@ def list_models():
 @click.option("--regulation", "--regulations", "-r", multiple=True, help="Regulation(s) to check against (built-in + custom). Can be given multiple times, e.g. -r EU-AIA -r GDPR")
 @click.option("--output", "-o", type=click.Path(), help="Output directory for reports")
 @click.option("--claude", "claude_model", default=None, is_flag=False, flag_value="", help="Use Claude with your API key (optionally specify model: --claude claude-sonnet-5)")
-@click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model: --openai gpt-4o)")
+@click.option("--openai", "openai_model", default=None, is_flag=False, flag_value="", help="Use OpenAI with your API key (optionally specify model: --openai gpt-6-astra)")
 @click.option("--claude-code", is_flag=True, help="Use your local Claude Code CLI - no API key needed")
 @click.option("--codex", is_flag=True, help="Use your local Codex CLI - no API key needed")
 @click.option("--select-clauses", is_flag=True, help="Interactively select clauses to scan")
@@ -710,11 +760,12 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
           exclude_clauses: Optional[List[str]], preset: Optional[str], verbose: bool,
           skip_confirmation: bool, max_cost: Optional[float], show_details: bool, passes: int, min_severity: str, ignore: Optional[List[str]],
           open_findings: bool, show_markdown: bool, show_cache_stats: Optional[bool], no_cache: bool):
-    """Run a compliance audit on your codebase - fully local (main command)."""
+    """Run a compliance audit on your codebase. Fully local."""
     provider, model = _resolve_provider_and_model(claude_model, openai_model, claude_code, codex)
     api_key = _validate_and_get_api_key(provider, model)
 
     regulations = _get_scan_regulations(regulation)
+    _validate_regulations(regulations, path)
     clauses_include, clauses_exclude = _setup_clause_scoping(
         select_clauses, include_clauses, exclude_clauses, preset, regulations
     )
@@ -733,7 +784,10 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         default_dir = (cfg.get("report", {}).get("output_dir") if cfg else None) or "clausi/reports"
         output_path = ensure_output_dir(abs_path, default_dir)
 
-    console.print(f"[bold]Starting compliance scan for {abs_path}[/bold]")
+    # Label and value on separate lines: an absolute Windows path pushes the
+    # one-line form past 80 columns, and Rich then wraps it mid-sentence.
+    console.print("[bold]Starting compliance scan[/bold]")
+    console.print(f"  Path: {abs_path}", highlight=False)
     reg_labels = []
     for r in regulations:
         reg_data = get_regulations().get(r, {})
@@ -742,7 +796,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         if version:
             label += f" (v{version})"
         reg_labels.append(label)
-    console.print(f"Regulations: {', '.join(reg_labels)}")
+    console.print(f"  Regulations: {', '.join(reg_labels)}", highlight=False)
 
     files, scope_meta = _discover_and_filter_files(
         abs_path, ignore,
@@ -942,7 +996,10 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
             )
             save_remediation_register(result["findings"], reg_output_dir)
             commit_lifecycle(lifecycle)
-            console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
+            if len(regulations) > 1:
+                # With one regulation this is the same path the closing line
+                # prints, so saying it twice just adds noise.
+                console.print(f"[green]Reports saved to: {reg_output_dir}[/green]")
         except Exception as e:  # noqa: BLE001
             # The scan succeeded and was paid for. If a report generator fails,
             # say so loudly and keep the findings that were already collected
@@ -999,7 +1056,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 finding.get("clause_id", ""),
                 finding.get("severity", ""),
                 finding.get("location", ""),
-                (finding.get("explanation", "") or "")[:80],
+                _summarize(finding.get("explanation", "")),
             )
 
         console.print(table)
@@ -1086,7 +1143,8 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         # a cost-truncated scan as a clean pass.
         raise SystemExit(2)
 
-    console.print(f"\n[green]Scan completed! Reports saved to {output_path}[/green]")
+    console.print("\n[green]Scan completed.[/green] Reports saved to:")
+    console.print(f"  {output_path}", highlight=False)
 
     from clausi.utils.output import display_findings_summary, open_in_editor
 
@@ -1216,7 +1274,7 @@ def docs_generate(path, output, exclude, include, claude_model, openai_model,
         clausi docs generate --claude-code       # Local Claude Code, no API key
         clausi docs generate --codex             # Local Codex CLI, no API key
         clausi docs generate --claude            # Force Claude via API key
-        clausi docs generate --openai gpt-4o     # Force OpenAI via API key
+        clausi docs generate --openai           # Force OpenAI via API key
         clausi docs generate --exclude "tests/*"
     """
     from clausi.core.docs_generator import DocsGenerator

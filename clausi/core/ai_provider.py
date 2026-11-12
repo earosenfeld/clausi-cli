@@ -471,11 +471,29 @@ class OpenAIProvider(AIProvider):
     """OpenAI provider."""
 
     name = "openai"
-    DEFAULT_MODEL = "gpt-4o"
+    # Balances capability against cost, which is the right trade for per-file
+    # scanning: the clause scaffold dominates each request, so a flagship-priced
+    # model multiplies the cost of text that is identical every time. Callers
+    # who want maximum capability can pass --openai gpt-6-astra.
+    DEFAULT_MODEL = "gpt-6.1-sol"
+    # USD per 1M tokens (input, output). Verified against OpenAI's published
+    # rates 2026-11-11. These drive the pre-scan estimate and the --max-cost
+    # guardrail, so a stale entry silently misquotes the user - gpt-4o sat here
+    # at $5/$15 long after it dropped to $2.50/$10, overstating every OpenAI
+    # scan by 2x. Unknown models fall back to DEFAULT_MODEL's rate.
     PRICING = {
-        "gpt-4": (30.0, 60.0),
+        "gpt-6-astra": (10.0, 50.0),
+        "gpt-6.1-sol": (2.0, 10.0),
+        "gpt-6.1-terra": (1.0, 5.0),
+        "gpt-6-luna": (0.10, 0.50),
+        # Superseded, kept so existing configs still price correctly.
+        "gpt-5.4": (2.50, 15.0),
+        "gpt-5-mini": (0.25, 2.0),
+        "gpt-4.1": (2.0, 8.0),
+        "gpt-4o": (2.50, 10.0),
+        "gpt-4o-mini": (0.15, 0.60),
         "gpt-4-turbo": (10.0, 30.0),
-        "gpt-4o": (5.0, 15.0),
+        "gpt-4": (30.0, 60.0),
     }
 
     def __init__(self, api_key: str, model: Optional[str] = None):

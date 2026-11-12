@@ -210,7 +210,7 @@ def build_ignore_matcher(project_path: str,
     if clausiignore_path:
         ignore_spec = parse_clausiignore_file(clausiignore_path)
         if ignore_spec:
-            console.print(f"[green]Using .clausiignore file: {clausiignore_path}[/green]")
+            console.print(f"[green]Using .clausiignore:[/green] {clausiignore_path}", highlight=False)
 
     cmd_ignore_spec = None
     if ignore_patterns and pathspec:
@@ -251,7 +251,7 @@ def filter_ignored_files_with_manifest(
     if clausiignore_path:
         ignore_spec = parse_clausiignore_file(clausiignore_path)
         if ignore_spec:
-            console.print(f"[green]Using .clausiignore file: {clausiignore_path}[/green]")
+            console.print(f"[green]Using .clausiignore:[/green] {clausiignore_path}", highlight=False)
 
     # Parse command-line ignore patterns
     cmd_ignore_spec = None
