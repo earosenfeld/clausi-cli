@@ -702,3 +702,38 @@ def test_plural_agrees_with_count(count, expected):
     from clausi.cli import _plural
 
     assert _plural(count) == expected
+
+
+def test_scope_boundary_reads_as_english_when_nothing_is_excluded():
+    from clausi.core.pdf_report import _scope_boundary
+
+    text = _scope_boundary({"clausiignore": "Not present", "ignore_patterns": []})
+    assert "[]" not in text
+    assert "No .clausiignore file" in text
+    assert "no CLI excludes" in text
+
+    text = _scope_boundary({"clausiignore": "/repo/.clausiignore", "ignore_patterns": ["build/*"]})
+    assert "/repo/.clausiignore" in text
+    assert "build/*" in text
+
+
+def test_finding_id_breaks_at_a_hyphen_not_mid_token():
+    from clausi.core.pdf_report import _break_finding_id
+
+    out = _break_finding_id("CL-EUAIA-ARTICLE10-EC29FE5A")
+    assert out == "CL-EUAIA-ARTICLE10-<br/>EC29FE5A"
+    assert _break_finding_id("F-001") == "F-001"
+
+
+def test_unpriced_model_warns_but_does_not_abort(capsys):
+    from clausi.cli import _warn_if_model_unpriced
+
+    _warn_if_model_unpriced("claude", "claude-opus-5")
+    assert capsys.readouterr().out.strip() == ""
+
+    _warn_if_model_unpriced("claude", "claude-made-up-9")
+    assert "No published rate" in capsys.readouterr().out
+
+    # Agent CLIs pick their own model and are not billed per token.
+    _warn_if_model_unpriced("claude-code", "")
+    assert capsys.readouterr().out.strip() == ""

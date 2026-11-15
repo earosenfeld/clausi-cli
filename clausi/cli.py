@@ -128,6 +128,32 @@ def save_audit_metadata(path: Path, metadata: Dict[str, Any]) -> None:
 
 # Helper functions for scan command
 
+def _warn_if_model_unpriced(provider: str, model: str) -> None:
+    """Say so when we have no published rate for the chosen model.
+
+    Costs are estimated from a per-model rate table. An unlisted model (a typo,
+    or one newer than this release) silently falls back to the default model's
+    rate, so the estimate and the --max-cost ceiling would both be quoted
+    against the wrong price without a word to the user.
+    """
+    if provider not in ("claude", "openai") or not model:
+        return
+
+    from clausi.core.ai_provider import ClaudeProvider, OpenAIProvider
+
+    pricing = ClaudeProvider.PRICING if provider == "claude" else OpenAIProvider.PRICING
+    if model in pricing:
+        return
+
+    default_model = ClaudeProvider.DEFAULT_MODEL if provider == "claude" else OpenAIProvider.DEFAULT_MODEL
+    console.print(
+        f"[yellow]No published rate for '{model}'.[/yellow] Costs are estimated at "
+        f"{default_model} rates and may be wrong. Run [bold]clausi models list[/bold] "
+        f"to see priced models.",
+        highlight=False,
+    )
+
+
 def _resolve_provider_and_model(claude_model: Optional[str], openai_model: Optional[str],
                                  claude_code: bool = False, codex: bool = False):
     """Resolve (provider, model) from flags, falling back to a key or local agent CLI.
@@ -767,6 +793,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
           open_findings: bool, show_markdown: bool, show_cache_stats: Optional[bool], no_cache: bool):
     """Run a compliance audit on your codebase. Fully local."""
     provider, model = _resolve_provider_and_model(claude_model, openai_model, claude_code, codex)
+    _warn_if_model_unpriced(provider, model)
     api_key = _validate_and_get_api_key(provider, model)
 
     regulations = _get_scan_regulations(regulation)
@@ -956,7 +983,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 # Recorded explicitly, because a blank field rendered as "Not
                 # recorded" and read like a bug rather than a property of
                 # running through someone else's CLI.
-                "model": model or f"{provider} CLI default",
+                "model": model or "CLI default (the agent picks its own)",
                 "total_tokens": result["token_usage"]["total_tokens"],
                 "cost": result["token_usage"]["cost"],
                 "files_scanned": len(files),

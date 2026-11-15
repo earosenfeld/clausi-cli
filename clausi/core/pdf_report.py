@@ -258,6 +258,44 @@ def _clean(value: Any) -> str:
     return text
 
 
+def _break_finding_id(finding_id: str) -> str:
+    """Break a finding ID at its last hyphen instead of mid-token.
+
+    ReportLab only wraps on spaces, so a 26-character ID in a 30mm column
+    came out as "CL-EUAIA-ARTICLE1 / 0-EC29FE5A" - the number split in half
+    and the ID unreadable. Breaking before the hash segment keeps both
+    halves meaningful.
+    """
+    safe = _safe(finding_id)
+    if len(finding_id) <= 18 or "-" not in finding_id:
+        return safe
+    head, _, tail = finding_id.rpartition("-")
+    return f"{_safe(head)}-<br/>{_safe(tail)}"
+
+
+def _scope_boundary(audit_meta: Dict[str, Any]) -> str:
+    """Plain-English scope line.
+
+    This used to print the raw values ("Not present; CLI patterns: []"),
+    which reads like debug output in a document a customer hands to an
+    auditor.
+    """
+    ignore_file = _clean(audit_meta.get("clausiignore"))
+    if ignore_file in ("", "Not present"):
+        parts = ["No .clausiignore file"]
+    else:
+        parts = [f".clausiignore: {ignore_file}"]
+
+    patterns = audit_meta.get("ignore_patterns") or []
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    if patterns:
+        parts.append("CLI excludes: " + ", ".join(_clean(p) for p in patterns))
+    else:
+        parts.append("no CLI excludes")
+    return "; ".join(parts)
+
+
 def _safe(value: Any) -> str:
     return escape(_clean(value)).replace("\n", "<br/>")
 
@@ -1232,7 +1270,7 @@ class PDFReportGenerator:
             ("Analyzed file types", type_summary),
             ("Analyzed source size", byte_summary),
             ("Clauses evaluated", str(clauses_scanned) if clauses_scanned else "Not recorded"),
-            ("Scope boundary", f"{_clean(audit_meta.get('clausiignore')) or 'No .clausiignore'}; CLI patterns: {_clean(audit_meta.get('ignore_patterns')) or 'none'}"),
+            ("Scope boundary", _scope_boundary(audit_meta)),
             ("AI provider / model", f"{_clean(provider) or 'Not recorded'} / {_clean(model) or 'Not recorded'}"),
             ("Regulation pack SHA-256", pack_hash),
             ("Reproduction command", _clean(audit_meta.get("scan_command")) or "Not recorded"),
@@ -1473,7 +1511,7 @@ class PDFReportGenerator:
             risk_label = _clean(finding.get("risk_rating")) or "Not scored"
             change = _clean(finding.get("change_status")) or "new"
             data.append([
-                Paragraph(f'<link href="#{_safe(finding_id)}" color="{CYAN_DARK.hexval()}">{_safe(finding_id)}</link>', self.styles["table_cell"]),
+                Paragraph(f'<link href="#{_safe(finding_id)}" color="{CYAN_DARK.hexval()}">{_break_finding_id(finding_id)}</link>', self.styles["table_cell"]),
                 Paragraph(f"<b>{_safe(severity)}</b><br/>{_safe(risk_label)}{f' / {risk_score}' if risk_score else ''}<br/>{_safe(change.title())}", self.styles["small"]),
                 Paragraph(f"<b>{_safe(clause)}</b><br/>{_safe(title)}", self.styles["table_cell"]),
                 Paragraph(
@@ -1487,7 +1525,9 @@ class PDFReportGenerator:
         # TARGET and STATUS were 13mm, which after padding left ~3mm of text
         # column - narrow enough that ReportLab broke the single-word headers
         # mid-word ("TARGE T", "STATU S") in the rendered PDF.
-        widths = [30 * mm, 18 * mm, 24 * mm, 50 * mm, 20 * mm, 16 * mm, 16 * mm]
+        # ID is 34mm because a finding ID's first line measures ~80pt at 7.5pt
+        # Helvetica; 30mm left 71pt and broke the clause number in half.
+        widths = [34 * mm, 18 * mm, 24 * mm, 46 * mm, 20 * mm, 16 * mm, 16 * mm]
         table = LongTable(data, repeatRows=1, colWidths=widths)
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), INK_2),
