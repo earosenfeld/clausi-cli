@@ -39,6 +39,9 @@ class _NullCache:
     def peek(self, key):
         return None
 
+    def peek_single_pass(self, key):
+        return None
+
     def key_lock(self, key):
         return contextlib.nullcontext()
 
@@ -737,3 +740,152 @@ def test_unpriced_model_warns_but_does_not_abort(capsys):
     # Agent CLIs pick their own model and are not billed per token.
     _warn_if_model_unpriced("claude-code", "")
     assert capsys.readouterr().out.strip() == ""
+
+
+# --- pass reuse ------------------------------------------------------------
+#
+# The default scan is one pass, and the advice printed after it is "re-run
+# with --passes 3". That advice is only fair if the pass already paid for
+# counts toward the three.
+
+
+def test_more_passes_reuse_the_cached_single_pass(tmp_path):
+    provider = _PricedProvider(cost_per_call=0.10,
+                               findings=[{"clause_id": "X-1", "severity": "high"}])
+    cache = LocalCache(enabled=True, cache_dir=tmp_path)
+
+    first = run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+                     provider=provider, cache=cache, passes=1)
+    assert len(provider.calls) == 1
+    assert first["findings"][0]["detection_passes"] == 1
+
+    second = run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+                      provider=provider, cache=cache, passes=3)
+
+    assert len(provider.calls) == 3, "pass 1 came from the cache; only 2 were new"
+    assert second["token_usage"]["cost"] == pytest.approx(0.20)
+    finding = second["findings"][0]
+    assert finding["detection_passes"] == 3
+    assert finding["detection_count"] == 3
+    assert not finding.get("cached"), "two of its three passes were live calls"
+    assert second["cache_stats"]["passes_reused"] == 1
+
+
+def test_pass_reuse_is_off_when_the_cache_is_off():
+    provider = _PricedProvider(cost_per_call=0.10,
+                               findings=[{"clause_id": "X-1", "severity": "high"}])
+    cache = LocalCache(enabled=False)
+
+    run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+             provider=provider, cache=cache, passes=1)
+    run_scan(files=FILES, regulation="Reg", clauses=CLAUSES,
+             provider=provider, cache=cache, passes=3)
+
+    assert len(provider.calls) == 4
+
+
+def test_pdf_scope_states_what_the_pass_count_means():
+    from clausi.core.pdf_report import _analysis_passes
+
+    single = _analysis_passes({"passes": 1})
+    assert "sample" in single and "--passes 3" in single
+    assert "3 passes" in _analysis_passes({"passes": 3})
+    # Reports rebuilt from metadata written before passes existed say nothing
+    # rather than inventing a count.
+    assert _analysis_passes({}) == ""
+
+
+# --- local agent scans -----------------------------------------------------
+#
+# --claude-code / --codex run on the user's own sign-in. Clausi cannot see
+# what that costs, so it must not quote a price or ask to approve one.
+
+
+def test_local_agent_scan_neither_prompts_nor_quotes_a_price(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    import clausi.cli as cli_module
+    from clausi.core.ai_provider import ClaudeCodeProvider
+
+    class _FakeClaudeCode(ClaudeCodeProvider):
+        def analyze_code(self, regulation, clauses, file_path, code):
+            return {"findings": [], "prompt_tokens": 10, "completion_tokens": 5}
+
+    monkeypatch.setattr(ClaudeCodeProvider, "is_available", classmethod(lambda cls: True))
+    monkeypatch.setattr(cli_module, "get_ai_provider",
+                        lambda provider, api_key, model: _FakeClaudeCode(model=model))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    # No -y and no stdin: a confirmation prompt would abort this run.
+    result = CliRunner().invoke(
+        cli_module.cli, ["scan", str(project), "-r", "EU-AIA", "--claude-code"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Proceed with analysis" not in result.output
+    assert "Est. cost" not in result.output
+    assert "Actual Cost" not in result.output
+    assert "$0.00" not in result.output
+    assert "Claude Code" in result.output
+    assert "Single pass" in result.output
+
+    report = (project / "clausi" / "reports" / "findings.md").read_text(encoding="utf-8")
+    assert "$0.0000" not in report
+    assert "Claude Code plan" in report
+
+
+def test_markdown_cost_is_a_dollar_figure_for_metered_providers():
+    from clausi.core.markdown_report import _cost_label
+
+    assert _cost_label({"cost": 0.1234}) == "$0.1234"
+    assert _cost_label({"cost": 0.0, "cost_unmetered_by": "Codex"}) == \
+        "Covered by your Codex plan (not metered)"
+
+
+# --- console glyphs --------------------------------------------------------
+
+
+def test_terminals_without_emoji_get_no_placeholder_words(monkeypatch):
+    from clausi.utils import emoji as emoji_module
+
+    monkeypatch.setattr(emoji_module, "supports_emoji", lambda: False)
+    # "[Chart] Cache Statistics" and "[Search] Scanning..." read as a missing
+    # asset. A decorative glyph that cannot be drawn is simply left out.
+    for name in ("chart", "search", "folder", "file", "clipboard", "info"):
+        assert emoji_module.lead(name) == "", name
+    # Status marks carry meaning, so they keep a fallback - and it is plain
+    # ASCII that Rich prints literally (a lowercase "[i]" would be parsed as
+    # an italic tag and vanish).
+    for name in ("check", "cross", "checkmark", "crossmark", "warning"):
+        fallback = emoji_module.get(name)
+        assert fallback and fallback.isascii() and not fallback[1:-1].islower(), name
+    assert emoji_module.lead("check") == "[OK] "
+
+    monkeypatch.setattr(emoji_module, "supports_emoji", lambda: True)
+    assert emoji_module.lead("chart").endswith(" ") and len(emoji_module.lead("chart")) > 1
+
+
+def test_windows_emoji_follow_the_terminal_not_the_platform(monkeypatch):
+    import io
+
+    from clausi.utils import emoji as emoji_module
+
+    monkeypatch.setattr(emoji_module.sys, "stdout",
+                        io.TextIOWrapper(io.BytesIO(), encoding="utf-8"))
+    monkeypatch.setattr(emoji_module.platform, "system", lambda: "Windows")
+    for name in ("WT_SESSION", "TERM_PROGRAM", "TERM"):
+        monkeypatch.delenv(name, raising=False)
+    assert emoji_module.supports_emoji() is False, "legacy console host draws boxes"
+
+    monkeypatch.setenv("WT_SESSION", "abc")
+    assert emoji_module.supports_emoji() is True
+
+    monkeypatch.setattr(emoji_module.sys, "stdout",
+                        io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    assert emoji_module.supports_emoji() is False, "a non-UTF stream cannot encode them"

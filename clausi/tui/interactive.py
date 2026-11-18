@@ -11,6 +11,7 @@ import yaml
 
 # Import regulations utilities
 from clausi.utils import regulations as regs_module
+from clausi.utils.emoji import get as emoji
 
 console = Console()
 
@@ -182,7 +183,7 @@ class ClausInteractiveTUI:
                 os.system(f'open "{file_path}"')
             else:
                 os.system(f'xdg-open "{file_path}"')
-            console.print(f"[green]✓[/green] Opened: {file_path}")
+            console.print(f"[green]{emoji('check')}[/green] Opened: {file_path}")
         except Exception as e:
             console.print(f"[red]Error opening file: {e}[/red]")
             console.print(f"[dim]File location: {file_path}[/dim]")
@@ -442,7 +443,7 @@ class ClausInteractiveTUI:
         try:
             with open(file_path, 'w') as f:
                 f.write(content)
-            console.print(f"\n[green]✓[/green] Created: {file_path}")
+            console.print(f"\n[green]{emoji('check')}[/green] Created: {file_path}")
             console.print(f"[dim]Edit this file to add your compliance requirements.[/dim]")
 
             # Ask if they want to open the file
@@ -540,7 +541,7 @@ class ClausInteractiveTUI:
         if "Create new custom regulation" in result:
             new_code = self.create_custom_regulation(project_path)
             if new_code:
-                console.print(f"\n[green]✓[/green] Custom regulation '{new_code}' created!")
+                console.print(f"\n[green]{emoji('check')}[/green] Custom regulation '{new_code}' created!")
                 return [new_code]
             return None
 
@@ -708,7 +709,7 @@ class ClausInteractiveTUI:
                     config = config_module.load_config() or {}
                     config.setdefault("api_keys", {})["anthropic"] = api_key.strip()
                     if config_module.save_config(config):
-                        console.print("[green]✓[/green] API key saved! You won't need to enter it again.\n")
+                        console.print(f"[green]{emoji('check')}[/green] API key saved! You won't need to enter it again.\n")
                     else:
                         console.print("[red]Failed to save API key[/red]\n")
                         return
@@ -736,7 +737,7 @@ class ClausInteractiveTUI:
                     config = config_module.load_config() or {}
                     config.setdefault("api_keys", {})["openai"] = api_key.strip()
                     if config_module.save_config(config):
-                        console.print("[green]✓[/green] API key saved! You won't need to enter it again.\n")
+                        console.print(f"[green]{emoji('check')}[/green] API key saved! You won't need to enter it again.\n")
                     else:
                         console.print("[red]Failed to save API key[/red]\n")
                         return
@@ -904,7 +905,7 @@ class ClausInteractiveTUI:
                 config = config_module.load_config() or {}
                 config.setdefault("api_keys", {})[config_field] = api_key.strip()
                 if config_module.save_config(config):
-                    console.print("[green]✓[/green] API key saved!\n")
+                    console.print(f"[green]{emoji('check')}[/green] API key saved!\n")
                 else:
                     console.print("[red]Failed to save API key[/red]\n")
                     return
@@ -931,7 +932,7 @@ class ClausInteractiveTUI:
             abs_path = Path(path).resolve()
             docs_dir = abs_path / "clausi" / "docs" / "latest"
             if docs_dir.exists():
-                console.print(f"\n[green]✓[/green] Documentation generated in: {docs_dir}")
+                console.print(f"\n[green]{emoji('check')}[/green] Documentation generated in: {docs_dir}")
 
                 open_docs = questionary.confirm(
                     "Open documentation in browser/editor?",

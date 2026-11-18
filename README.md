@@ -284,8 +284,9 @@ clausi scan . -r EU-AIA --codex
 Clausi shells out to the `claude` or `codex` binary already on your `PATH` and
 passes the prompt over stdin. There is no API key to configure and no
 per-token charge from Clausi or from the provider's API - the work runs
-under whatever plan already covers that CLI. Estimated cost is reported as
-`$0.00` for these runs, because from Clausi's side it is.
+under whatever plan already covers that CLI. Clausi cannot see that plan, so
+these runs show no cost estimate and skip the confirmation prompt; reports
+record the cost as covered by your agent plan rather than as a dollar figure.
 
 Requirements:
 
@@ -498,9 +499,9 @@ clausi --help       Show help
 | `--show-markdown` | Display summary in terminal |
 | `--show-cache-stats` | Show cache hit/miss statistics |
 | `--no-cache` | Disable the local cache for this run |
-| `--skip-confirmation, -y` | Skip cost confirmation prompt |
+| `--skip-confirmation, -y` | Skip the cost confirmation prompt (API-key scans only; local agent scans never prompt) |
 | `--max-cost FLOAT` | Hard spend ceiling. Refuses to start if the estimate exceeds it, and stops mid-scan if real usage reaches it (exits 2) |
-| `--passes N` | Analyze each file N times (1-5) and report how often each finding recurs. Costs N times as much |
+| `--passes N` | Analyze each file N times (1-5) and report how often each finding recurs. One pass is a sample: model output varies run to run. A single pass already in the local cache counts as the first of N, so `--passes 3` after a default scan pays for two more |
 | `--min-severity LEVEL` | Only report findings at or above this severity |
 | `--show-details` | Show per-file token and cost estimates |
 | `--select-clauses` | Pick clauses interactively before scanning |

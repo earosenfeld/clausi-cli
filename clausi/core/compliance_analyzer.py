@@ -381,10 +381,21 @@ def analyze_file(provider: AIProvider, cache: LocalCache, regulation: str,
         if budget is not None:
             budget.reserve(projected_cost)
 
+        # A default scan already paid for one pass of this exact file. Count it
+        # as the first of N instead of buying it again, so asking for more
+        # passes after a first look costs only the extra ones.
+        seed_pass = None
+        if passes > 1:
+            seed_pass = cache.peek_single_pass(cache.generate_cache_key(
+                content, regulation, clauses=clause_ids, provider=provider.name,
+                model=provider.model, analysis_fingerprint=analysis_fingerprint(clauses),
+                passes=1,
+            ))
+
         try:
             findings, usage, not_assessed = _analyze_uncached(
                 provider, cache, regulation, clauses, file_path, content, cache_key,
-                passes=passes,
+                passes=passes, seed_pass=seed_pass,
             )
         except Exception:
             # Release the reservation. A failed call produced no findings, and
@@ -441,15 +452,35 @@ def _confidence(finding: Dict[str, Any]) -> float:
 
 
 def _analyze_uncached(provider, cache, regulation, clauses, file_path, content,
-                       cache_key, passes: int = 1):
-    """Call the provider and cache the result. Caller holds the key lock."""
+                       cache_key, passes: int = 1,
+                       seed_pass: Optional[Dict[str, Any]] = None):
+    """Call the provider and cache the result. Caller holds the key lock.
+
+    `seed_pass` is an earlier single-pass result for the same content; when
+    given it stands in for the first pass, so only the remaining passes call
+    the provider.
+    """
     pass_findings = []
     not_assessed: List[Dict[str, Any]] = []
     prompt_total = completion_total = 0
     cache_read_total = cache_write_total = 0
     cost_total = 0.0
+    remaining = max(1, passes)
 
-    for _ in range(max(1, passes)):
+    if seed_pass is not None:
+        seeded = []
+        for finding in seed_pass.get("findings") or []:
+            finding = dict(finding)
+            finding["file_path"] = file_path
+            # Belongs to the 1-pass entry it came from; merge_passes restates it.
+            for stale in ("cached", "detection_passes", "detection_count", "detection_rate"):
+                finding.pop(stale, None)
+            seeded.append(finding)
+        pass_findings.append(seeded)
+        not_assessed = seed_pass.get("not_assessed") or []
+        remaining -= 1
+
+    for _ in range(remaining):
         result = provider.analyze_code(regulation, clauses, file_path, content)
         pass_findings.append([_remap_finding(raw, file_path) for raw in result["findings"]])
         # Abstentions from the last pass: they describe the same file, and

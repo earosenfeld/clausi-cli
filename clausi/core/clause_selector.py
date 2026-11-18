@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 from rich.table import Table
 from rich.prompt import Prompt
 from clausi.utils.console import console
+from clausi.utils.emoji import get as emoji, lead
 
 # Predefined clause presets for quick scoping.
 # IDs here must match the "id:" field in clausi/data/regulations/*.yml exactly -
@@ -130,7 +131,7 @@ def select_clauses_interactive(regulation: str, all_clauses: Optional[List[dict]
     Returns:
         Tuple of (include_list, exclude_list)
     """
-    console.print(f"\n[cyan]📋 Clause Selection for {regulation}[/cyan]\n")
+    console.print(f"\n[cyan]{lead('clipboard')}Clause Selection for {regulation}[/cyan]\n")
 
     # Show available presets
     presets = list_available_presets(regulation)
@@ -153,11 +154,11 @@ def select_clauses_interactive(regulation: str, all_clauses: Optional[List[dict]
                 # User selected a preset
                 preset_name = presets[choice_idx]
                 selected = get_preset_clauses(regulation, preset_name)
-                console.print(f"\n[green]✓ Selected preset '{preset_name}' with {len(selected)} clauses[/green]")
+                console.print(f"\n[green]{emoji('check')} Selected preset '{preset_name}' with {len(selected)} clauses[/green]")
                 return selected, None
             elif choice_idx == len(presets) + 1:
                 # User wants all clauses
-                console.print("\n[green]✓ Scanning all clauses[/green]")
+                console.print(f"\n[green]{emoji('check')} Scanning all clauses[/green]")
                 return None, None
         except (ValueError, IndexError):
             pass
@@ -223,19 +224,19 @@ def select_clauses_manual(all_clauses: List[dict]) -> Tuple[Optional[List[str]],
 
     if selection.lower() == 'high':
         selected = [c['id'] for c in all_clauses if c.get('priority') in ['high', 'critical']]
-        console.print(f"\n[green]✓ Selected {len(selected)} high-priority clauses[/green]")
+        console.print(f"\n[green]{emoji('check')} Selected {len(selected)} high-priority clauses[/green]")
         return selected, None
 
     if selection.lower() == 'critical':
         selected = [c['id'] for c in all_clauses if c.get('priority') == 'critical']
-        console.print(f"\n[green]✓ Selected {len(selected)} critical clauses[/green]")
+        console.print(f"\n[green]{emoji('check')} Selected {len(selected)} critical clauses[/green]")
         return selected, None
 
     # Parse comma-separated numbers and ranges
     try:
         indices = parse_selection_string(selection)
         selected = [all_clauses[i - 1]['id'] for i in indices if 0 < i <= len(all_clauses)]
-        console.print(f"\n[green]✓ Selected {len(selected)} clauses[/green]")
+        console.print(f"\n[green]{emoji('check')} Selected {len(selected)} clauses[/green]")
         return selected, None
     except (ValueError, IndexError) as e:
         console.print(f"[red]Invalid selection: {e}[/red]")

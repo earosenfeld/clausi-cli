@@ -91,6 +91,18 @@ def _get_priority_remediation_items(findings: List[Dict[str, Any]], limit: int =
     return candidates[:limit]
 
 
+def _cost_label(audit_meta: Dict[str, Any]) -> str:
+    """What the scan cost, or who covered it when Clausi could not meter it.
+
+    A local agent CLI runs on the user's own sign-in, so the provider reports
+    zero. Printing that as "$0.0000" would state a price we never observed.
+    """
+    agent = audit_meta.get("cost_unmetered_by")
+    if agent:
+        return f"Covered by your {agent} plan (not metered)"
+    return f"${audit_meta.get('cost', 0):.4f}"
+
+
 def _file_importance_score(file_path: str) -> int:
     lowered = file_path.lower()
     if any(k in lowered for k in ("main", "app", "index", "server", "api")):
@@ -231,7 +243,7 @@ class MarkdownGenerator:
                   f"| Blocking Issues | {readiness['blocking_count']} |",
                   f"| High-Risk Gaps | {readiness['high_count']} |",
                   f"| Remediation Effort | {effort} |",
-                  f"| Cost | ${audit_meta.get('cost', 0):.4f} |", ""]
+                  f"| Cost | {_cost_label(audit_meta)} |", ""]
 
         changes = audit_meta.get("change_summary") or {}
         if changes:
@@ -318,7 +330,7 @@ class MarkdownGenerator:
                    f"- Provider: {audit_meta.get('provider')}",
                    f"- Model: {audit_meta.get('model')}",
                    f"- Total tokens: {audit_meta.get('total_tokens', 0):,}",
-                   f"- Cost: ${audit_meta.get('cost', 0):.4f}"]
+                   f"- Cost: {_cost_label(audit_meta)}"]
 
         lines.append(self._footer())
         return "\n".join(lines)

@@ -41,6 +41,7 @@ class LocalCache:
         self.cache_dir = cache_dir or get_cache_dir()
         self.hits = 0
         self.misses = 0
+        self.passes_reused = 0
         # Scans run on a thread pool, so hit/miss counters and the per-key
         # in-flight locks below both need guarding.
         self._stats_lock = threading.Lock()
@@ -94,6 +95,21 @@ class LocalCache:
         result = entry["result"]
         result["cached"] = True
         return result
+
+    def peek_single_pass(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Read an entry to reuse as one pass of a larger multi-pass analysis.
+
+        Leaves hit/miss stats alone: the file as a whole is still a miss, since
+        the remaining passes go to the provider.
+        """
+        if not self.enabled:
+            return None
+        entry = self._read(cache_key)
+        if entry is None:
+            return None
+        with self._stats_lock:
+            self.passes_reused += 1
+        return entry["result"]
 
     def generate_cache_key(self, file_content: str, regulation: str,
                             clauses: Optional[List[str]] = None,
@@ -165,6 +181,7 @@ class LocalCache:
             "total_files": total,
             "cache_hits": self.hits,
             "cache_misses": self.misses,
+            "passes_reused": self.passes_reused,
             "cache_hit_rate": (self.hits / total) if total else 0.0,
         }
 

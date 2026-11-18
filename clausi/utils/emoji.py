@@ -1,78 +1,80 @@
-"""Cross-platform emoji support with ASCII fallbacks for Windows."""
+"""Console glyphs, with plain-text fallbacks for terminals that cannot draw them."""
 
-import sys
+import os
 import platform
+import sys
+
+# Environment variables set by Windows terminals that render emoji: Windows
+# Terminal (WT_SESSION), VS Code and other modern emulators (TERM_PROGRAM),
+# and Git Bash / MSYS (TERM). The legacy console host - a bare cmd.exe or
+# PowerShell window - sets none of them and draws emoji as empty boxes even
+# when stdout is UTF-8, so on Windows emoji are opted into per terminal
+# rather than assumed.
+_WINDOWS_EMOJI_ENV = ("WT_SESSION", "TERM_PROGRAM", "TERM")
 
 
 def supports_emoji() -> bool:
-    """Check if the current console supports emoji characters.
-
-    Returns:
-        bool: True if emoji is supported, False otherwise
-    """
-    # Check if we're on Windows
-    if platform.system() == "Windows":
-        # Windows 10+ with WT supports emoji, but cmd.exe doesn't
-        # Safest is to disable emoji on Windows to avoid crashes
+    """Whether the current terminal can be trusted to draw emoji."""
+    encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+    if encoding and "utf" not in encoding:
         return False
-
-    # Check if stdout encoding supports Unicode
-    if hasattr(sys.stdout, 'encoding'):
-        encoding = sys.stdout.encoding or ''
-        # ASCII or charmap encodings don't support emoji
-        if encoding.lower() in ('ascii', 'charmap', 'cp1252'):
-            return False
-
+    if platform.system() == "Windows":
+        return any(os.environ.get(name) for name in _WINDOWS_EMOJI_ENV)
     return True
 
 
-# Emoji map with ASCII fallbacks
-EMOJI_MAP = {
+# name -> (glyph, fallback). Status glyphs keep a short ASCII fallback because
+# they carry meaning (this passed, this failed). Decorative glyphs fall back to
+# nothing: a heading reads better bare than behind a "[Chart]" placeholder.
+_GLYPHS = {
     # Status indicators
-    "check": "✓" if supports_emoji() else "[OK]",
-    "cross": "✗" if supports_emoji() else "[X]",
-    "checkmark": "✅" if supports_emoji() else "[OK]",
-    "crossmark": "❌" if supports_emoji() else "[ERROR]",
-    "warning": "⚠️" if supports_emoji() else "[!]",
-    "info": "💡" if supports_emoji() else "[i]",
+    "check": ("\u2713", "[OK]"),
+    "cross": ("\u2717", "[X]"),
+    "checkmark": ("\u2705", "[OK]"),
+    "crossmark": ("\u274c", "[ERROR]"),
+    "warning": ("\u26a0\ufe0f", "[!]"),
+    "red_circle": ("\U0001f534", "[!]"),
+    "yellow_circle": ("\U0001f7e1", "[*]"),
+    "green_circle": ("\U0001f7e2", "[+]"),
 
-    # Status colors
-    "red_circle": "🔴" if supports_emoji() else "[!]",
-    "yellow_circle": "🟡" if supports_emoji() else "[*]",
-    "green_circle": "🟢" if supports_emoji() else "[+]",
-
-    # Actions
-    "search": "🔍" if supports_emoji() else "[Search]",
-    "folder": "📁" if supports_emoji() else "[Folder]",
-    "file": "📄" if supports_emoji() else "[File]",
-    "clipboard": "📋" if supports_emoji() else "[List]",
-    "chart": "📊" if supports_emoji() else "[Chart]",
-    "credit_card": "💳" if supports_emoji() else "[Payment]",
-    "party": "🎉" if supports_emoji() else "[!]",
+    # Decorative
+    "info": ("\U0001f4a1", ""),
+    "search": ("\U0001f50d", ""),
+    "folder": ("\U0001f4c1", ""),
+    "file": ("\U0001f4c4", ""),
+    "clipboard": ("\U0001f4cb", ""),
+    "chart": ("\U0001f4ca", ""),
+    "credit_card": ("\U0001f4b3", ""),
+    "party": ("\U0001f389", ""),
 
     # Numbers
-    "one": "1️⃣" if supports_emoji() else "1.",
-    "two": "2️⃣" if supports_emoji() else "2.",
-    "three": "3️⃣" if supports_emoji() else "3.",
+    "one": ("1\ufe0f\u20e3", "1."),
+    "two": ("2\ufe0f\u20e3", "2."),
+    "three": ("3\ufe0f\u20e3", "3."),
 }
 
 
 def get(name: str, fallback: str = "") -> str:
-    """Get emoji by name with automatic fallback for unsupported terminals.
+    """Glyph for `name`, or its plain-text fallback on terminals without emoji.
 
-    Args:
-        name: Emoji name from EMOJI_MAP
-        fallback: Custom fallback if emoji name not found
+    Use this for status marks that sit inside a sentence. For a glyph that
+    opens a line, use `lead()` so the fallback does not leave a stray space.
+    """
+    glyph = _GLYPHS.get(name)
+    if glyph is None:
+        return fallback
+    return glyph[0] if supports_emoji() else glyph[1]
 
-    Returns:
-        str: Emoji character or ASCII fallback
+
+def lead(name: str) -> str:
+    """Glyph for `name` followed by a space, or nothing if it has no fallback.
 
     Example:
-        >>> from clausi.utils.emoji import get
-        >>> print(f"{get('check')} Success")
-        ✓ Success  # or [OK] Success on Windows
+        >>> print(f"{lead('search')}Scanning project...")
+        (emoji) Scanning project...   # or just "Scanning project..."
     """
-    return EMOJI_MAP.get(name, fallback)
+    glyph = get(name)
+    return f"{glyph} " if glyph else ""
 
 
 def strip_emoji(text: str) -> str:

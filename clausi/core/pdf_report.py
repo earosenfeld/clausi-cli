@@ -273,6 +273,27 @@ def _break_finding_id(finding_id: str) -> str:
     return f"{_safe(head)}-<br/>{_safe(tail)}"
 
 
+def _analysis_passes(audit_meta: Dict[str, Any]) -> str:
+    """How many times each file was analyzed, and what that means for a reader.
+
+    Model output varies run to run, so the pass count is part of the evidence:
+    a finding register built from one sample is a different claim from one
+    where every finding was seen in three of three passes.
+    """
+    try:
+        passes = int(audit_meta.get("passes") or 0)
+    except (TypeError, ValueError):
+        passes = 0
+    if passes < 1:
+        return ""
+    if passes == 1:
+        return ("1 per file. A single pass is a sample: a repeat run can surface "
+                "a clause this one missed. Re-run with --passes 3 to measure how "
+                "often each finding recurs.")
+    return (f"{passes} per file. Each finding records how many of the {passes} "
+            "passes detected it.")
+
+
 def _scope_boundary(audit_meta: Dict[str, Any]) -> str:
     """Plain-English scope line.
 
@@ -1275,6 +1296,10 @@ class PDFReportGenerator:
             ("Regulation pack SHA-256", pack_hash),
             ("Reproduction command", _clean(audit_meta.get("scan_command")) or "Not recorded"),
         ]
+        analysis_passes = _analysis_passes(audit_meta)
+        if analysis_passes:
+            position = [label for label, _ in rows].index("Scope boundary")
+            rows.insert(position, ("Analysis passes", analysis_passes))
         data = [
             [Paragraph(_safe(label), self.styles["small_bold"]), Paragraph(_safe(value), self.styles["table_cell"])]
             for label, value in rows

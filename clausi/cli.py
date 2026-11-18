@@ -40,7 +40,7 @@ from clausi.core.remediation_register import save_remediation_register
 from clausi.utils.console import console
 from clausi.utils.output import ensure_output_dir
 from clausi.utils import regulations as regs_module
-from clausi.utils.emoji import get as emoji
+from clausi.utils.emoji import get as emoji, lead
 
 # Lazy-loaded regulation registry (built-in bundled + custom, all local - no network)
 _REGULATIONS_CACHE = None
@@ -127,6 +127,17 @@ def save_audit_metadata(path: Path, metadata: Dict[str, Any]) -> None:
 
 
 # Helper functions for scan command
+
+def _local_agent_name(provider: str) -> Optional[str]:
+    """Friendly name of the local agent CLI behind `provider`, or None for an API key.
+
+    A local agent runs on whatever sign-in the user already has, so Clausi has
+    no per-token bill to quote, estimate, or ask them to approve.
+    """
+    from clausi.core.ai_provider import LOCAL_AGENT_PROVIDERS
+    local_cls = LOCAL_AGENT_PROVIDERS.get(provider)
+    return local_cls.friendly_name if local_cls else None
+
 
 def _warn_if_model_unpriced(provider: str, model: str) -> None:
     """Say so when we have no published rate for the chosen model.
@@ -777,7 +788,9 @@ def list_models():
 @click.option("--show-details", is_flag=True, help="Show per-file token estimates")
 @click.option("--passes", type=click.IntRange(1, 5), default=1,
               help="Analyze each file N times and report how often each finding "
-                   "recurs. Costs N times as much; 1 pass is a sample, not a measurement.")
+                   "recurs. One pass is a sample, not a measurement. A pass already "
+                   "in the local cache is reused, so raising N only pays for the "
+                   "extra passes.")
 @click.option("--min-severity", type=click.Choice(["info", "low", "medium", "high", "critical"]), default="info", help="Minimum severity to report")
 @click.option("--ignore", multiple=True, help="Ignore files/directories (can be given multiple times)")
 @click.option("--open-findings/--no-open-findings", default=None,
@@ -873,19 +886,30 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
         )
     est_cost = sum(e["cost"] for e in estimates.values())
 
-    console.print("\n[bold]Estimate (informational - billed directly by your provider):[/bold]")
-    console.print(f"Files: {len(files)}  |  Regulations: {len(regulations)}  |  Est. cost: ${est_cost:.2f}")
-    if any(e.get("prompt_caching") for e in estimates.values()):
+    local_agent = _local_agent_name(provider)
+    if local_agent:
+        # No dollar figure: the agent runs on the user's own sign-in, and a
+        # "$0.00" quote would claim something about their plan we cannot see.
+        console.print("\n[bold]Scan plan:[/bold]")
+        console.print(f"Files: {len(files)}  |  Regulations: {len(regulations)}")
         console.print(
-            "[dim]Assumes no local cache hits. The clause text is sent once and "
-            "cached by the provider, so only the first file pays full price for "
-            "it.[/dim]"
+            f"[dim]Runs through your {local_agent} sign-in. Usage counts against "
+            f"that plan; there is no separate per-token bill to estimate.[/dim]"
         )
     else:
-        console.print(
-            "[dim]Assumes no cache hits. Each file's request also carries the full "
-            "clause text, which is most of the cost on small files.[/dim]"
-        )
+        console.print("\n[bold]Estimate (informational - billed directly by your provider):[/bold]")
+        console.print(f"Files: {len(files)}  |  Regulations: {len(regulations)}  |  Est. cost: ${est_cost:.2f}")
+        if any(e.get("prompt_caching") for e in estimates.values()):
+            console.print(
+                "[dim]Assumes no local cache hits. The clause text is sent once and "
+                "cached by the provider, so only the first file pays full price for "
+                "it.[/dim]"
+            )
+        else:
+            console.print(
+                "[dim]Assumes no cache hits. Each file's request also carries the full "
+                "clause text, which is most of the cost on small files.[/dim]"
+            )
     if passes > 1:
         console.print(
             f"[dim]{passes} passes per file: each finding will carry how many "
@@ -898,9 +922,10 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 f"~{est['prompt_overhead_tokens']:,} tokens per file"
             )
             for f in est["per_file"]:
+                cost_note = "" if local_agent else f"  (${f['cost']:.4f})"
                 console.print(
                     f"    {f['path']}: ~{f['input_tokens']:,} in / "
-                    f"~{f['output_tokens']:,} out  (${f['cost']:.4f})"
+                    f"~{f['output_tokens']:,} out{cost_note}"
                 )
 
     if max_cost is not None and est_cost > max_cost:
@@ -910,7 +935,9 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     # The estimate is a guess; the ceiling has to hold against real usage too.
     budget = compliance_analyzer.CostBudget(max_cost)
 
-    if not skip_confirmation:
+    # The prompt exists to approve a charge. A local agent scan has none to
+    # approve, so asking would only add a keystroke to the first-run path.
+    if not skip_confirmation and not local_agent:
         if not click.confirm(f"\nProceed with analysis? Estimated cost: ${est_cost:.2f}"):
             console.print("[yellow]Analysis cancelled by user[/yellow]")
             sys.exit(0)
@@ -933,7 +960,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
 
     for reg_code in regulations:
         reg_data = regulation_data[reg_code]
-        console.print(f"\n{emoji('search')} Scanning against [bold]{reg_data['name']}[/bold]...")
+        console.print(f"\n{lead('search')}Scanning against [bold]{reg_data['name']}[/bold]...")
 
         try:
             with console.status(f"Analyzing {len(files)} file(s)..."):
@@ -998,6 +1025,7 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
                 "regulation_pack_sha256": regulation_pack_hash(reg_data),
                 "max_file_chars": max_file_chars,
                 "passes": passes,
+                "cost_unmetered_by": local_agent,
                 "not_assessed": result.get("not_assessed", []),
                 "truncated_files": result.get("truncated", []),
                 # Files that errored mid-scan are part of coverage, not just
@@ -1115,7 +1143,22 @@ def scan(path: str, regulation: Optional[List[str]], output: Optional[str], clau
     else:
         console.print(f"\n[green]{emoji('checkmark')} No findings - looks compliant![/green]")
 
-    console.print(f"\n[bold]Actual Cost:[/bold] ${total_cost:.4f}")
+    if local_agent:
+        console.print(f"\n[bold]Cost:[/bold] covered by your {local_agent} plan (not metered by Clausi)")
+    else:
+        console.print(f"\n[bold]Actual Cost:[/bold] ${total_cost:.4f}")
+
+    if passes == 1 and not all_errors and not regulation_failures:
+        # Said at the point of decision, not only in the report: one pass can
+        # miss a clause that the next run catches, and a clean result from a
+        # single sample is weaker evidence than it looks.
+        reuse = (" The pass just completed is reused from the local cache, so "
+                 "that costs two more passes, not three.") if cache.enabled else ""
+        console.print(
+            "[dim]Single pass: a clause missed on one run can be caught on the "
+            "next. Re-run with --passes 3 to see how often each finding recurs."
+            f"{reuse}[/dim]"
+        )
 
     if total_cache_read:
         # What the scaffold would have cost at full rate, minus what the cached
@@ -1315,7 +1358,7 @@ def docs_generate(path, output, exclude, include, claude_model, openai_model,
     api_key = _validate_and_get_api_key(provider, model)
 
     project_path = Path(path).resolve()
-    console.print(f"\n{emoji('folder')} Project: [bold]{project_path}[/bold]")
+    console.print(f"\n{lead('folder')}Project: [bold]{project_path}[/bold]")
 
     output_dir = Path(output).resolve() if output else project_path / "clausi" / "docs" / "latest"
 
@@ -1329,7 +1372,7 @@ def docs_generate(path, output, exclude, include, claude_model, openai_model,
         model=model,
     )
 
-    console.print(f"\n{emoji('search')} Scanning project...")
+    console.print(f"\n{lead('search')}Scanning project...")
     file_count, loc_count = generator.scan_project()
     console.print(f"   Files found: {file_count}")
     console.print(f"   Lines of code: {loc_count:,}")
@@ -1341,14 +1384,21 @@ def docs_generate(path, output, exclude, include, claude_model, openai_model,
     ai_provider = get_ai_provider(provider, api_key, model)
     est_tokens = generator.estimate_tokens()
     est_cost = ai_provider.estimate_cost(est_tokens, est_tokens // 3)
-    console.print(f"\n{emoji('info')} Rough estimate (billed directly by your provider): ~${est_cost:.2f}")
+    local_agent = _local_agent_name(provider)
+    if local_agent:
+        console.print(
+            f"\n{lead('info')}Runs through your {local_agent} sign-in; usage counts "
+            f"against that plan."
+        )
+    else:
+        console.print(f"\n{lead('info')}Rough estimate (billed directly by your provider): ~${est_cost:.2f}")
 
-    if not skip_confirmation:
+    if not skip_confirmation and not local_agent:
         if not click.confirm("\nProceed with documentation generation?"):
             console.print("[yellow]Cancelled[/yellow]")
             sys.exit(0)
 
-    console.print(f"\n{emoji('search')} Generating documentation...\n")
+    console.print(f"\n{lead('search')}Generating documentation...\n")
 
     def _progress(i, total, filename):
         console.print(f"  [{i}/{total}] {filename}...")

@@ -8,7 +8,7 @@ from typing import Optional, List
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from clausi.utils.emoji import get as emoji
+from clausi.utils.emoji import get as emoji, lead
 from clausi.utils.console import console
 
 
@@ -127,7 +127,7 @@ def display_markdown_summary(file_path: Path, max_lines: int = 20) -> None:
         md = Markdown(summary_content)
         console.print(Panel(
             md,
-            title=f"📄 {file_path.name} (Preview)",
+            title=f"{lead('file')}{file_path.name} (Preview)",
             border_style="blue"
         ))
 
@@ -154,7 +154,7 @@ def create_run_folder(base_output_dir: Path, project_name: str) -> Path:
     run_folder = base_output_dir / run_folder_name
     run_folder.mkdir(parents=True, exist_ok=True)
 
-    console.print(f"[cyan]📁 Created run folder: {run_folder}[/cyan]")
+    console.print(f"[cyan]{lead('folder')}Created run folder: {run_folder}[/cyan]")
 
     return run_folder
 
@@ -205,10 +205,10 @@ def download_markdown_files(
             elif response.status_code == 404:
                 console.print(f"[dim]  {filename} not available[/dim]")
             else:
-                console.print(f"[yellow]⚠ Could not download {filename}: {response.status_code}[/yellow]")
+                console.print(f"[yellow]{emoji('warning')} Could not download {filename}: {response.status_code}[/yellow]")
 
         except Exception as e:
-            console.print(f"[red]✗ Error downloading {filename}: {e}[/red]")
+            console.print(f"[red]{emoji('cross')} Error downloading {filename}: {e}[/red]")
 
     return downloaded
 
@@ -223,12 +223,12 @@ def display_findings_summary(findings_file: Path) -> None:
         return
 
     console.print("\n" + "=" * 60)
-    console.print("📋 FINDINGS SUMMARY")
+    console.print(f"{lead('clipboard')}FINDINGS SUMMARY")
     console.print("=" * 60 + "\n")
 
     display_markdown_summary(findings_file, max_lines=30)
 
-    console.print(f"\n[cyan]💡 View full report: {findings_file}[/cyan]")
+    console.print(f"\n[cyan]{lead('info')}View full report: {findings_file}[/cyan]")
     console.print(f"[dim]   Or run: cat {findings_file}[/dim]\n")
 
 
@@ -251,7 +251,7 @@ def display_cache_statistics(cache_stats: dict) -> None:
     if not cache_stats:
         return
 
-    console.print(f"\n[bold cyan]{emoji('chart')} Cache Statistics[/bold cyan]")
+    console.print(f"\n[bold cyan]{lead('chart')}Cache Statistics[/bold cyan]")
 
     table = Table(show_header=False, box=None)
     table.add_column("Metric", style="cyan")
@@ -265,6 +265,12 @@ def display_cache_statistics(cache_stats: dict) -> None:
     cache_hits = cache_stats.get("cache_hits", 0)
     total_files = cache_stats.get("total_files", 0)
     table.add_row("Files Cached", f"{cache_hits} / {total_files}")
+
+    # Passes carried over from an earlier single-pass scan. Without this row a
+    # multi-pass re-run reads as "0 files cached" although part of it was free.
+    passes_reused = cache_stats.get("passes_reused", 0)
+    if passes_reused:
+        table.add_row("Passes Reused", f"{passes_reused} (from an earlier single-pass scan)")
 
     # Cost saved ($ only - hybrid approach, tokens kept internal)
     cost_saved = cache_stats.get("cost_saved", 0)
